@@ -68,3 +68,28 @@ export function receiptPath(scope, { home = os.homedir(), cwd = process.cwd() } 
 
 export const MARKER_BEGIN = '<!-- BEGIN aanyberg/agent-conventions -->'
 export const MARKER_END = '<!-- END aanyberg/agent-conventions -->'
+
+/**
+ * Interpret an answer to the global agent prompt.
+ *
+ * Pure so it can be tested without a terminal: the prompt itself needs a TTY,
+ * but the rule for turning "1 3", "a" or "" into a set of agents is the part
+ * with edge cases worth pinning down.
+ *
+ * An answer that matches nothing is treated as a typo and falls back to the
+ * preset — installing for no agents at all is never what someone meant.
+ */
+export function parseAgentSelection(answer, { preset }) {
+  const all = SELECTABLE_AGENTS.map((a) => a.id)
+  const text = String(answer ?? '').trim()
+  if (text === '') return { agents: preset, reason: 'preset' }
+  if (/^(a|all)$/i.test(text)) return { agents: all, reason: 'all' }
+  const chosen = text
+    .split(/[,\s]+/)
+    .filter(Boolean)
+    .map((n) => SELECTABLE_AGENTS[Number(n) - 1])
+    .filter(Boolean)
+    .map((a) => a.id)
+  const unique = [...new Set(chosen)]
+  return unique.length ? { agents: unique, reason: 'chosen' } : { agents: preset, reason: 'unrecognised' }
+}

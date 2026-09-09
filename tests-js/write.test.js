@@ -19,7 +19,7 @@ import {
   applyInstructionWrite, classify, hasBlock, installSkill, linkSkill,
   planInstructionWrite, removeBlock, renderBlock, upsertBlock,
 } from '../src/write.js'
-import { MARKER_BEGIN, MARKER_END } from '../src/targets.js'
+import { MARKER_BEGIN, MARKER_END, parseAgentSelection } from '../src/targets.js'
 
 let tmp
 before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-test-')) })
@@ -208,5 +208,45 @@ describe('skills', () => {
     assert.equal(linkSkill(canonical, link, { copy: true }), 'copy')
     assert.equal(fs.lstatSync(link).isSymbolicLink(), false)
     assert.equal(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8'), 'body')
+  })
+})
+
+describe('agent selection from the global prompt', () => {
+  const ALL = ['claude-code', 'codex', 'github-copilot', 'opencode', 'cursor', 'gemini-cli']
+  const preset = ['claude-code', 'codex']
+
+  test('"a" and "all" both select every agent', () => {
+    for (const answer of ['a', 'A', 'all', 'ALL', ' all ']) {
+      assert.deepEqual(parseAgentSelection(answer, { preset }).agents, ALL, `failed for ${JSON.stringify(answer)}`)
+    }
+  })
+
+  test('an empty answer takes the preset', () => {
+    const result = parseAgentSelection('', { preset })
+    assert.deepEqual(result.agents, preset)
+    assert.equal(result.reason, 'preset')
+  })
+
+  test('numbers map to agents, in any separator style', () => {
+    assert.deepEqual(parseAgentSelection('1 3', { preset }).agents, ['claude-code', 'github-copilot'])
+    assert.deepEqual(parseAgentSelection('1,3', { preset }).agents, ['claude-code', 'github-copilot'])
+    assert.deepEqual(parseAgentSelection('1, 3', { preset }).agents, ['claude-code', 'github-copilot'])
+  })
+
+  test('duplicates collapse', () => {
+    assert.deepEqual(parseAgentSelection('2 2 2', { preset }).agents, ['codex'])
+  })
+
+  test('an unrecognised answer falls back rather than selecting nothing', () => {
+    // Installing for no agents is never what someone meant by a typo.
+    for (const answer of ['x', '99', '0', '-1']) {
+      const result = parseAgentSelection(answer, { preset })
+      assert.deepEqual(result.agents, preset, `"${answer}" should fall back`)
+      assert.equal(result.reason, 'unrecognised')
+    }
+  })
+
+  test('out-of-range numbers are dropped but valid ones still count', () => {
+    assert.deepEqual(parseAgentSelection('1 99', { preset }).agents, ['claude-code'])
   })
 })

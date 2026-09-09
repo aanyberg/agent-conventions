@@ -245,3 +245,31 @@ describe('argument handling', () => {
     assert.match(run(['--help'], { home }), /agent-conventions/)
   })
 })
+
+describe('uninstall does not take content the installer did not add', () => {
+  test('keeps what you appended to a file the installer created', () => {
+    const { home } = sandbox('uninstall-appended')
+    run(['-g', '-a', 'codex', '-y'], { home })
+
+    // The installer created this file. The user then adds their own notes.
+    const codexAgents = path.join(home, '.codex', 'AGENTS.md')
+    const mine = '\n# Notes I added later\n\nKeep these.\n'
+    fs.appendFileSync(codexAgents, mine)
+
+    run(['uninstall', '-g'], { home })
+
+    assert.ok(fs.existsSync(codexAgents), 'the file must survive — it is no longer only ours')
+    const after = fs.readFileSync(codexAgents, 'utf8')
+    assert.match(after, /Notes I added later/, 'their content must survive')
+    assert.ok(!after.includes('BEGIN aanyberg'), 'our block must be gone')
+  })
+
+  test('still deletes a created file that holds nothing but our block', () => {
+    const { home } = sandbox('uninstall-only-ours')
+    run(['-g', '-a', 'codex', '-y'], { home })
+    const codexAgents = path.join(home, '.codex', 'AGENTS.md')
+    assert.ok(fs.existsSync(codexAgents))
+    run(['uninstall', '-g'], { home })
+    assert.ok(!fs.existsSync(codexAgents), 'a file containing only our block should not be left empty')
+  })
+})

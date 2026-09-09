@@ -15,7 +15,7 @@ import readline from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
 
 import { buildPlan, renderDisclosure } from '../src/plan.js'
-import { SELECTABLE_AGENTS } from '../src/targets.js'
+import { SELECTABLE_AGENTS, parseAgentSelection } from '../src/targets.js'
 import {
   applyInstructionWrite, installSkill, linkSkill, readReceipt, removeBlock, writeReceipt,
 } from '../src/write.js'
@@ -124,28 +124,33 @@ async function promptForScope(rl) {
 }
 
 async function promptForAgents(rl, scope, detected) {
+  const all = SELECTABLE_AGENTS.map((a) => a.id)
+
   if (scope === 'project') {
-    // One write covers every agent but Claude Code, so there is nothing to pick.
-    console.log('\n.agents/skills/ covers Codex, GitHub Copilot, OpenCode, Cursor, Gemini CLI and others.')
-    console.log('Claude Code reads only .claude/skills/.\n')
+    // One write to .agents/skills already serves every agent here, so the only
+    // real choice is whether to bridge Claude Code — which reads its own path.
+    // Say so explicitly: "all agents" is the default, not something to opt into.
+    console.log('\nInstalling for ALL agents. One .agents/skills/ directory covers Codex,')
+    console.log('GitHub Copilot, OpenCode, Cursor, Gemini CLI and others.\n')
+    console.log('Claude Code is the exception — it reads only .claude/skills/.\n')
     const answer = await ask(rl, 'Also link Claude Code? [Y/n]: ', 'y')
-    const claude = !answer.toLowerCase().startsWith('n')
-    return claude ? SELECTABLE_AGENTS.map((a) => a.id) : SELECTABLE_AGENTS.map((a) => a.id).filter((a) => a !== 'claude-code')
+    return answer.toLowerCase().startsWith('n') ? all.filter((a) => a !== 'claude-code') : all
   }
+
   console.log('\nInstall for which agents?\n')
   SELECTABLE_AGENTS.forEach((a, i) => {
     const mark = detected.includes(a.id) ? '*' : ' '
     console.log(`  ${mark} ${i + 1}) ${a.label}`)
   })
+  console.log('\n    a) All of the above')
   console.log('\n  * = detected on this machine')
-  const preset = detected.length ? detected : SELECTABLE_AGENTS.map((a) => a.id)
-  const answer = await ask(rl, `\nNumbers, or Enter for detected [${preset.join(', ')}]: `, '')
-  if (!answer) return preset
-  return answer
-    .split(/[,\s]+/).filter(Boolean)
-    .map((n) => SELECTABLE_AGENTS[Number(n) - 1])
-    .filter(Boolean)
-    .map((a) => a.id)
+  const preset = detected.length ? detected : all
+  const answer = await ask(rl, `\nNumbers, "a" for all, or Enter for detected [${preset.join(', ')}]: `, '')
+  const { agents, reason } = parseAgentSelection(answer, { preset })
+  if (reason === 'unrecognised') {
+    console.log(`Nothing recognised in "${answer}" — using the detected set.`)
+  }
+  return agents
 }
 
 async function runInstall(opts) {
@@ -237,7 +242,11 @@ async function runInstall(opts) {
 
   writeReceipt(plan.receipt, receipt)
   console.log(`\nReceipt: ${plan.receipt}`)
-  console.log(`Undo:    npx ${PKG.name} uninstall ${scope === 'global' ? '-g' : '-p'}`)
+  // Both forms are printed because either may be the one that works: the
+  // published name until the package is on npm, the git specifier after.
+  const flag = scope === 'global' ? '-g' : '-p'
+  console.log(`Undo:    npx ${PKG.name} uninstall ${flag}`)
+  console.log(`         npx github:aanyberg/agent-conventions uninstall ${flag}`)
   return 0
 }
 
@@ -257,15 +266,19 @@ async function runUninstall(opts) {
   for (const dir of receipt.skills?.dirs ?? []) fs.rmSync(dir, { recursive: true, force: true })
   for (const item of receipt.instructions ?? []) {
     try {
-      if (item.applied === 'create' || item.applied === 'replaced-symlink') {
+      // Always strip the block and judge by what is left, even for a file this
+      // installer created. Keying off `applied === 'create'` and deleting
+      // outright would take anything the user added to that file afterwards —
+      // a small data-loss case, but the same class as the symlink one.
+      const text = fs.readFileSync(item.file, 'utf8')
+      const stripped = removeBlock(text)
+      if (stripped === '') {
         fs.rmSync(item.file, { force: true })
+        console.log(`removed  ${item.file}`)
       } else {
-        const text = fs.readFileSync(item.file, 'utf8')
-        const stripped = removeBlock(text)
-        if (stripped === '') fs.rmSync(item.file, { force: true })
-        else fs.writeFileSync(item.file, stripped, 'utf8')
+        fs.writeFileSync(item.file, stripped, 'utf8')
+        console.log(`stripped ${item.file} (kept your content)`)
       }
-      console.log(`removed  ${item.file}`)
     } catch (err) {
       console.error(`skipped  ${item.file}: ${err.message}`)
     }

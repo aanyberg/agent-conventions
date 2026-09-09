@@ -26,7 +26,7 @@ import re
 
 import pytest
 
-from conftest import SPEC_FRONTMATTER_KEYS
+from conftest import SPEC_FRONTMATTER_KEYS, agent_files
 
 # `${CLAUDE_PLUGIN_ROOT}` and friends resolve only inside Claude Code. Anywhere
 # else they stay literal text, so a path built from one silently points nowhere.
@@ -44,6 +44,15 @@ VENDOR_COMPONENT_DIR = re.compile(
 # is read by 30+ agents; the rest are each read by exactly one.
 VENDOR_INSTRUCTION_FILE = re.compile(
     r"\b(?:CLAUDE\.md|GEMINI\.md|QWEN\.md|copilot-instructions\.md|\.cursorrules)\b"
+)
+
+# Names of files under agents/, which install only through the Claude Code
+# plugin route (see .codex-plugin/plugin.json and gemini-extension.json, which
+# point at skills/ alone). A skill that hands off to one of these by name, with
+# no qualifier, reads as a universal dependency to every other consumer.
+AGENT_NAMES = sorted(p.stem for p in agent_files())
+AGENT_HANDOFF = re.compile(
+    r"\*{0,2}(" + "|".join(re.escape(n) for n in AGENT_NAMES) + r")\*{0,2}\s+agent\b"
 )
 
 # Tool names from Claude Code's vocabulary. Other agents expose different tools
@@ -169,6 +178,23 @@ def test_skill_names_no_vendor_specific_tool(skill):
     )
 
 
+def test_skill_names_an_agent_only_with_a_claude_code_qualifier(skill):
+    """A skill may mention an agents/ file, but only as a Claude Code-specific option.
+
+    Without the qualifier the sentence reads as if every consumer gets that
+    agent, but agents/ ships only through the Claude Code plugin route.
+    """
+    for lineno, line in enumerate(skill.body.splitlines(), start=1):
+        match = AGENT_HANDOFF.search(line)
+        if match and "Claude Code" not in line:
+            raise AssertionError(
+                f"{skill.rel}:{lineno}: names the '{match.group(1)}' agent as if "
+                f"universally available; agents/ only ships via the Claude Code plugin "
+                f"route — qualify it with 'in Claude Code' or describe the capability "
+                f"generically (a separate subagent, a human)"
+            )
+
+
 def test_agent_body_interpolates_no_vendor_variable(agent):
     found = _hits(VENDOR_VARIABLE, agent.body)
     assert not found, f"{agent.rel}: {found} resolve only inside one agent"
@@ -221,6 +247,8 @@ CAUGHT = [
     (TOOL_PHRASE, "dispatch with the Task tool"),
     (TOOL_PHRASE, "prefer the Read and Write tools"),
     (TOOL_BACKTICKED, "call `WebFetch` on the URL"),
+    (AGENT_HANDOFF, "hand off to the **docs-change-steward** agent"),
+    (AGENT_HANDOFF, "hand off to the docs-change-steward agent, which enforces"),
 ]
 
 # Prose that must keep passing. The first two are the live case from
@@ -236,6 +264,8 @@ IGNORED = [
     (TOOL_PHRASE, "read the policy first, then edit"),
     (TOOL_PHRASE, "this is a read-only review task"),
     (TOOL_BACKTICKED, "the `Read` step is implicit"),
+    (AGENT_HANDOFF, "docs-standards (docs-change-steward)"),
+    (AGENT_HANDOFF, "see architecture-planning for the ADR format"),
 ]
 
 

@@ -28,6 +28,10 @@ Add the marketplace and enable the plugin in the consumer repo's `.claude/settin
 > repository name, but marketplace keys are not redirected — change `conventions@lahnvik` to `conventions@aanyberg`
 > in `enabledPlugins`, and rename the `extraKnownMarketplaces` key to match, or the plugin will stop resolving.
 
+## Not using Claude Code?
+
+The skills in this repo are portable — [`skills/`](../skills) follows the [Agent Skills specification](https://agentskills.io/specification), so Codex, GitHub Copilot, OpenCode, Cursor and Gemini CLI can all load the same copy. The rest of this document covers the Claude Code plugin route specifically; for the others see **Skills — any agent** in the root [README.md](../README.md).
+
 ## `CLAUDE.md` header
 
 Every consumer repo's `CLAUDE.md` should start with:

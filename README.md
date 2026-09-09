@@ -13,13 +13,53 @@ These components enhance AI coding assistants by providing domain knowledge, cod
 
 ## Installation
 
-### Agents & Skills (Claude Code)
+### Skills — any agent
 
-Claude Code loads agents and skills via the plugin marketplace at `.claude-plugin/marketplace.json` — see [docs/CONSUMER.md](docs/CONSUMER.md) for the exact `.claude/settings.json` snippet and CLI commands. Agents and skills live at [`agents/`](agents) and [`skills/`](skills).
+The skills follow the [Agent Skills specification](https://agentskills.io/specification), so one copy works in every agent that reads it. Install them with the ecosystem's CLI:
+
+```bash
+# this project only
+npx skills add aanyberg/agent-conventions
+
+# every project on this machine
+npx skills add aanyberg/agent-conventions -g
+```
+
+It prompts for scope and agents. To skip the prompts:
+
+```bash
+npx skills add aanyberg/agent-conventions -a codex -a github-copilot -a opencode -y
+```
+
+Agent flags: `claude-code`, `codex`, `github-copilot`, `opencode`, `cursor`, `gemini-cli`, and [70+ others](https://github.com/vercel-labs/skills#supported-agents).
+
+**Only two directories are ever written**, at either scope:
+
+| Path | Read by |
+| --- | --- |
+| `.agents/skills/` (or `~/.agents/skills/`) | Codex, GitHub Copilot, OpenCode, Cursor, Gemini CLI, Cline, Zed, Amp and others — this is the cross-vendor convention |
+| `.claude/skills/` (or `~/.claude/skills/`) | Claude Code, the one holdout — symlinked to the above, not a second copy |
+
+Because Claude Code is a symlink into the same files, there is no duplicate to drift. At project scope, commit `.agents/skills/` and gitignore `.claude/skills/`.
+
+### Skills & agents — Claude Code plugin
+
+The plugin route additionally installs the [`agents/`](agents), which are Claude-specific, and updates through `claude plugin update` rather than re-running an installer:
+
+```bash
+claude plugin marketplace add aanyberg/agent-conventions
+claude plugin install conventions@aanyberg
+```
+
+A consumer repo can commit the marketplace in `.claude/settings.json` so contributors need no per-person install at all — see [docs/CONSUMER.md](docs/CONSUMER.md).
 
 ### Global Instructions
 
-`AGENTS.md` is the single source of truth for global instructions. Symlink it to each tool's expected config path:
+`AGENTS.md` is the single source of truth. The filename is the portable part — 30+ tools read a project's `AGENTS.md` directly — but *global* instructions are a different matter: each tool looks in its own config directory, and two of them expect a different filename there. So every tool below needs a link, and what portability buys you is one file to edit rather than three to keep in sync.
+
+> **This step is manual for now.** The symlinks below are the current method; they are being replaced by an installer that appends a marked block instead, so an existing file is never clobbered. Until then, note that a symlink means edits to the target write back into this repository.
+
+Symlink `AGENTS.md` to each tool's expected config path:
 
 **Claude Code**
 ```bash

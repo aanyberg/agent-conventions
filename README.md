@@ -42,6 +42,21 @@ Agent flags: `claude-code`, `codex`, `github-copilot`, `opencode`, `cursor`, `ge
 
 Because Claude Code is a symlink into the same files, there is no duplicate to drift. At project scope, commit `.agents/skills/` and gitignore `.claude/skills/`.
 
+### Native plugin install
+
+Each ecosystem has its own manifest, all pointing at the same top-level [`skills/`](skills):
+
+```bash
+# Codex, Cursor, ChatGPT, Kiro, VS Code — via the Agent Plugins standard
+# (plugin.json at the repo root)
+
+claude plugin marketplace add aanyberg/agent-conventions   # Claude Code
+copilot plugin marketplace add aanyberg/agent-conventions  # GitHub Copilot CLI
+gemini extensions install aanyberg/agent-conventions       # Gemini CLI
+```
+
+Codex discovers the repo through `.codex-plugin/plugin.json`; Copilot CLI reads the same `.claude-plugin/marketplace.json` Claude Code does.
+
 ### Skills & agents — Claude Code plugin
 
 The plugin route additionally installs the [`agents/`](agents), which are Claude-specific, and updates through `claude plugin update` rather than re-running an installer:
@@ -100,6 +115,7 @@ What it checks:
 
 | Area | Checks |
 | --- | --- |
+| Install manifests | the four ecosystem manifests parse, declare the same version, and point at the same `skills/`; `plugin.json` matches the Agent Plugins name grammar and carries no key outside its schema, which sets `additionalProperties: false` so an extra key invalidates the file rather than being ignored |
 | Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |
 | Skills | frontmatter has `name` and `description`, `name` matches the directory, names are unique, descriptions fit the loader budget, and every key is one the Agent Skills spec permits — `version` is not one of them, it belongs inside `metadata` |
 | Agents | `name` matches the filename and is kebab-case; `tools`, `model`, `effort`, `maxTurns`, and `permissionMode` are present and valid; `plan`-mode agents declare no write tools |

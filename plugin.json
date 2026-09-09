@@ -1,0 +1,12 @@
+{
+  "$schema": "https://agent-plugins.org/schemas/1.0.0/plugin.schema.json",
+  "name": "agent-conventions",
+  "version": "1.0.0",
+  "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows.",
+  "author": {
+    "name": "Alexander Nyberg"
+  },
+  "repository": "https://github.com/aanyberg/agent-conventions",
+  "license": "MIT",
+  "keywords": ["conventions", "code-standards", "git", "backlog", "planning"]
+}

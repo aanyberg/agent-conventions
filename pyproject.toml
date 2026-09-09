@@ -4,7 +4,7 @@
 # config. Nothing here is built, installed, or published.
 
 [project]
-name = "agent-configs"
+name = "agent-conventions"
 version = "0"
 requires-python = ">=3.11"
 dependencies = []

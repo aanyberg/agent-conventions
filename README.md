@@ -1,10 +1,10 @@
-# agent-configs
+# agent-conventions
 
 A collection of specialized agents, skills, and development guidelines for AI coding assistants.
 
 This repository contains:
 
-- **`plugins/conventions`** — A Claude Code plugin bundling the agents and skills below. See [docs/CONSUMER.md](docs/CONSUMER.md) for how a consumer repo loads it via the `lahnvik` marketplace, with no copying into `~/.claude`.
+- **`skills/` and `agents/`** — The repository root is itself a Claude Code plugin (`conventions`), so these sit at the top level rather than nested under a plugin directory. That is also where the wider agent ecosystem scans for `SKILL.md` files. See [docs/CONSUMER.md](docs/CONSUMER.md) for how a consumer repo loads them via the `aanyberg` marketplace, with no copying into `~/.claude`.
   - **Agents** — Specialized multi-step task runners for common development workflows (feature planning, refactoring, documentation updates, etc.)
   - **Skills** — Focused knowledge modules covering code standards, best practices, and workflows across Python, TypeScript, and general development
 - **Instructions** — A single `AGENTS.md` file with project-level guidance that works across all supported tools
@@ -15,7 +15,7 @@ These components enhance AI coding assistants by providing domain knowledge, cod
 
 ### Agents & Skills (Claude Code)
 
-Claude Code loads agents and skills via the plugin marketplace at `.claude-plugin/marketplace.json` — see [docs/CONSUMER.md](docs/CONSUMER.md) for the exact `.claude/settings.json` snippet and CLI commands. Agents and skills live at `plugins/conventions/agents` and `plugins/conventions/skills`.
+Claude Code loads agents and skills via the plugin marketplace at `.claude-plugin/marketplace.json` — see [docs/CONSUMER.md](docs/CONSUMER.md) for the exact `.claude/settings.json` snippet and CLI commands. Agents and skills live at [`agents/`](agents) and [`skills/`](skills).
 
 ### Global Instructions
 
@@ -23,22 +23,22 @@ Claude Code loads agents and skills via the plugin marketplace at `.claude-plugi
 
 **Claude Code**
 ```bash
-ln -s /path/to/agent-configs/AGENTS.md ~/.claude/CLAUDE.md
+ln -s /path/to/agent-conventions/AGENTS.md ~/.claude/CLAUDE.md
 ```
 
 **GitHub Copilot**
 ```bash
 mkdir -p ~/.copilot
-ln -s /path/to/agent-configs/AGENTS.md ~/.copilot/copilot-instructions.md
+ln -s /path/to/agent-conventions/AGENTS.md ~/.copilot/copilot-instructions.md
 ```
 
 **OpenAI Codex CLI**
 ```bash
 mkdir -p ~/.codex
-ln -s /path/to/agent-configs/AGENTS.md ~/.codex/AGENTS.md
+ln -s /path/to/agent-conventions/AGENTS.md ~/.codex/AGENTS.md
 ```
 
-Replace `/path/to/agent-configs` with the absolute path to your local clone, e.g. `/home/<username>/projects/agent-configs`.
+Replace `/path/to/agent-conventions` with the absolute path to your local clone, e.g. `/home/<username>/projects/agent-conventions`.
 
 ## Validation
 
@@ -58,7 +58,7 @@ What it checks:
 
 | Area | Checks |
 | --- | --- |
-| Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin |
+| Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |
 | Skills | frontmatter has `name` and `description`, `name` matches the directory, names are unique, descriptions fit the loader budget, and no unrecognised (silently ignored) keys |
 | Agents | `name` matches the filename and is kebab-case; `tools`, `model`, `effort`, `maxTurns`, and `permissionMode` are present and valid; `plan`-mode agents declare no write tools |
 | References | relative markdown links resolve, shipped scripts are executable with a shebang, and every skill or agent named in prose exists |

@@ -26,7 +26,7 @@ VALID_TOOLS = {
 def test_every_skill_directory_has_a_skill_file():
     missing = [
         str(d.relative_to(repo_root()))
-        for d in sorted(repo_root().glob("plugins/*/skills/*"))
+        for d in sorted(repo_root().glob("skills/*"))
         if d.is_dir() and not (d / "SKILL.md").is_file()
     ]
     assert not missing, f"skill directories without a SKILL.md: {missing}"

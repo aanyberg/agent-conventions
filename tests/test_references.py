@@ -16,7 +16,7 @@ REFERENCE = re.compile(r"\*\*([a-z0-9]+(?:-[a-z0-9]+)+)\*\*")
 # Bolded hyphenated terms that are ordinary prose, not skill or agent names.
 # Real skill and agent names are resolved from disk, so a rename still fails here.
 NOT_A_REFERENCE = {
-    "agent-configs", "github-issues", "release-commit-only", "per-branch",
+    "agent-conventions", "github-issues", "release-commit-only", "per-branch",
     "issue-number", "needs-discussion", "needs-human", "agent-safe",
     "in-review", "run-lock-issue", "planning-runs-dir", "short-kebab",
     "backlog-migration", "delete-tests", "skip-tests", "delete-or-skip-test",
@@ -44,7 +44,7 @@ def test_relative_markdown_links_resolve(md_file):
 
 def test_shipped_scripts_are_executable_with_a_shebang():
     problems = []
-    for script in sorted(repo_root().glob("plugins/*/skills/*/scripts/*.sh")):
+    for script in sorted(repo_root().glob("skills/*/scripts/*.sh")):
         rel = script.relative_to(repo_root())
         if not script.stat().st_mode & 0o111:
             problems.append(f"{rel} (not executable)")
@@ -59,7 +59,7 @@ def test_references_to_shipped_scripts_resolve():
     Paths that name no shipped script (e.g. `scripts/worktree-up.sh`) are
     consumer-repo policy values, not plugin assets, and are out of scope.
     """
-    shipped = {p.name: p for p in repo_root().glob("plugins/*/skills/*/scripts/*.sh")}
+    shipped = {p.name: p for p in repo_root().glob("skills/*/scripts/*.sh")}
     problems = []
     for path in skill_files() + agent_files():
         text = path.read_text(encoding="utf-8")

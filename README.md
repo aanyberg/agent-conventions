@@ -23,7 +23,9 @@ npx github:aanyberg/agent-conventions -g
 npx github:aanyberg/agent-conventions -g --dry-run
 ```
 
-Once the package is on npm the shorter `npx @aanyberg/agent-conventions@latest` works identically. The `github:` form needs nothing published and accepts any ref — `github:aanyberg/agent-conventions#v1.1.0` pins a release.
+Once the package is on npm the shorter `npx @anyberg/agent-conventions@latest` works identically.
+
+> **Note the spelling.** The npm scope is `@anyberg` (one `a`); the GitHub org and the Claude marketplace are `aanyberg` (two). They are separate namespaces and the handles differ — `github:aanyberg/…` and `conventions@aanyberg` are correct as written. The `github:` form needs nothing published and accepts any ref — `github:aanyberg/agent-conventions#v1.1.0` pins a release.
 
 Run bare, it asks for scope and agents, prints every path it will touch, and defaults to **no**. `-y` skips the prompt but still prints the plan. Nothing global is written without the paths appearing on screen first.
 
@@ -149,7 +151,7 @@ So if you installed the package globally, remove the content first and the packa
 
 ```bash
 npx github:aanyberg/agent-conventions uninstall -g
-npm uninstall -g @aanyberg/agent-conventions
+npm uninstall -g @anyberg/agent-conventions
 ```
 
 The other order strands the files with the tool gone. Recoverable — the receipt is still on disk and `npx` re-fetches — but avoidable.
@@ -196,7 +198,7 @@ Neither step can be scripted from here — both need an authenticated session:
 1. **npm** — publish `1.0.0` manually once (`npm publish --access public`), since a trusted publisher can only be added to a package that exists. Then under the package's *Settings → Trusted publishers*, add: repository `aanyberg/agent-conventions`, workflow `release.yml`, environment `release`.
 2. **GitHub** — create an environment named `release` (*Settings → Environments*). Adding yourself as a required reviewer there puts a human approval in front of every publish, which is worth having for a public registry.
 
-Until step 1 is done, `npx @aanyberg/agent-conventions` will not resolve — use the `github:` form above, which needs nothing published. Publishing buys a shorter command, a tarball fetch instead of a clone, and a provenance attestation; it does not add capability.
+Until step 1 is done, `npx @anyberg/agent-conventions` will not resolve — use the `github:` form above, which needs nothing published. Publishing buys a shorter command, a tarball fetch instead of a clone, and a provenance attestation; it does not add capability.
 
 There is deliberately **no `postinstall` hook**. `npm install` does nothing on its own; the installer is run explicitly.
 

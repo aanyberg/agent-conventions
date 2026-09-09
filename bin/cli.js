@@ -26,8 +26,8 @@ const PKG = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 
 const USAGE = `
 agent-conventions ${PKG.version}
 
-  npx @aanyberg/agent-conventions            install (prompts for scope and agents)
-  npx @aanyberg/agent-conventions uninstall  remove exactly what the receipt records
+  npx @anyberg/agent-conventions            install (prompts for scope and agents)
+  npx @anyberg/agent-conventions uninstall  remove exactly what the receipt records
 
 Options
   -g, --global            install for every project on this machine

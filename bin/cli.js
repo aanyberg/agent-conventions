@@ -237,7 +237,11 @@ async function runInstall(opts) {
 
   writeReceipt(plan.receipt, receipt)
   console.log(`\nReceipt: ${plan.receipt}`)
-  console.log(`Undo:    npx ${PKG.name} uninstall ${scope === 'global' ? '-g' : '-p'}`)
+  // Both forms are printed because either may be the one that works: the
+  // published name until the package is on npm, the git specifier after.
+  const flag = scope === 'global' ? '-g' : '-p'
+  console.log(`Undo:    npx ${PKG.name} uninstall ${flag}`)
+  console.log(`         npx github:aanyberg/agent-conventions uninstall ${flag}`)
   return 0
 }
 

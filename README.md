@@ -17,18 +17,20 @@ These components enhance AI coding assistants by providing domain knowledge, cod
 
 ```bash
 # this machine, every project — skills and global instructions
-npx @aanyberg/agent-conventions@latest -g
+npx github:aanyberg/agent-conventions -g
 
 # preview without writing anything
-npx @aanyberg/agent-conventions@latest -g --dry-run
+npx github:aanyberg/agent-conventions -g --dry-run
 ```
+
+Once the package is on npm the shorter `npx @aanyberg/agent-conventions@latest` works identically. The `github:` form needs nothing published and accepts any ref — `github:aanyberg/agent-conventions#v1.1.0` pins a release.
 
 Run bare, it asks for scope and agents, prints every path it will touch, and defaults to **no**. `-y` skips the prompt but still prints the plan. Nothing global is written without the paths appearing on screen first.
 
 It writes a receipt, so `uninstall` removes exactly what was installed and nothing else:
 
 ```bash
-npx @aanyberg/agent-conventions@latest uninstall -g
+npx github:aanyberg/agent-conventions uninstall -g
 ```
 
 **Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path is already a **symlink** — which it will be if you followed the older setup below — the installer refuses it rather than writing through the link into your clone. `--replace-symlinks` converts it, leaving the file it pointed at untouched.
@@ -138,7 +140,9 @@ Neither step can be scripted from here — both need an authenticated session:
 1. **npm** — publish `1.0.0` manually once (`npm publish --access public`), since a trusted publisher can only be added to a package that exists. Then under the package's *Settings → Trusted publishers*, add: repository `aanyberg/agent-conventions`, workflow `release.yml`, environment `release`.
 2. **GitHub** — create an environment named `release` (*Settings → Environments*). Adding yourself as a required reviewer there puts a human approval in front of every publish, which is worth having for a public registry.
 
-Until step 1 is done, `npx @aanyberg/agent-conventions` will not resolve.
+Until step 1 is done, `npx @aanyberg/agent-conventions` will not resolve — use the `github:` form above, which needs nothing published. Publishing buys a shorter command, a tarball fetch instead of a clone, and a provenance attestation; it does not add capability.
+
+There is deliberately **no `postinstall` hook**. `npm install` does nothing on its own; the installer is run explicitly. A hook that wrote to `~/.claude/CLAUDE.md` as a side effect of `npm install` would surprise anyone auditing the package, and npm offers no matching uninstall hook to clean up afterwards, so those files would be orphaned in `$HOME`.
 
 ## Validation
 

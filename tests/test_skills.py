@@ -5,13 +5,14 @@ from __future__ import annotations
 import re
 from collections import Counter
 
-from conftest import parse_frontmatter, repo_root, skill_files
+from conftest import SPEC_FRONTMATTER_KEYS, parse_frontmatter, repo_root, skill_files
 
 NAME = re.compile(r"^[a-z0-9]+(?:-[a-z0-9]+)*$")
 
-# Keys Claude Code actually reads from SKILL.md frontmatter. Anything else is
-# silently ignored at load time, so an unknown key is dead configuration.
-ALLOWED_KEYS = {"name", "description", "allowed-tools", "license", "metadata", "version"}
+# Frontmatter keys a SKILL.md may carry. This is the Agent Skills spec set, not
+# a Claude-specific one — Claude Code reads a subset and ignores the rest, so an
+# unknown key here is dead configuration in Claude *and* unportable elsewhere.
+ALLOWED_KEYS = SPEC_FRONTMATTER_KEYS
 
 # Descriptions longer than this are truncated when the skill list is built,
 # which cuts off the trigger phrases at the end and hurts routing.
@@ -61,9 +62,9 @@ def test_skill_description_fits_the_loader_budget(skill):
 def test_skill_has_no_unknown_frontmatter_keys(skill):
     unknown = set(skill.frontmatter) - ALLOWED_KEYS
     assert not unknown, (
-        f"{skill.rel}: unrecognised frontmatter key(s) {sorted(unknown)}; "
-        f"Claude Code ignores these, so they are dead configuration "
-        f"(tool restrictions go in 'allowed-tools')"
+        f"{skill.rel}: frontmatter key(s) {sorted(unknown)} are outside the Agent "
+        f"Skills spec; Claude Code ignores them and other agents may reject the file "
+        f"(tool restrictions go in 'allowed-tools'; arbitrary data goes in 'metadata')"
     )
 
 

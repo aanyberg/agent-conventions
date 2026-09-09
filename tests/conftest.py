@@ -15,6 +15,20 @@ import yaml
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
+# The complete set of frontmatter keys the Agent Skills specification permits
+# (agentskills.io/specification). Anything outside it is not portable: a
+# spec-conformant loader in another agent may reject or ignore the whole file.
+# `version` is deliberately absent — it belongs inside `metadata`, not at the
+# top level.
+SPEC_FRONTMATTER_KEYS = {
+    "name",
+    "description",
+    "license",
+    "compatibility",
+    "metadata",
+    "allowed-tools",
+}
+
 
 @dataclass(frozen=True)
 class Doc:

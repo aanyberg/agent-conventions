@@ -142,7 +142,12 @@ Neither step can be scripted from here — both need an authenticated session:
 
 Until step 1 is done, `npx @aanyberg/agent-conventions` will not resolve — use the `github:` form above, which needs nothing published. Publishing buys a shorter command, a tarball fetch instead of a clone, and a provenance attestation; it does not add capability.
 
-There is deliberately **no `postinstall` hook**. `npm install` does nothing on its own; the installer is run explicitly. A hook that wrote to `~/.claude/CLAUDE.md` as a side effect of `npm install` would surprise anyone auditing the package, and npm offers no matching uninstall hook to clean up afterwards, so those files would be orphaned in `$HOME`.
+There is deliberately **no `postinstall` hook**. `npm install` does nothing on its own; the installer is run explicitly.
+
+That is not only a matter of taste. `npm uninstall` removes the package and **nothing the installer wrote** — not the skills, not the instruction blocks, not the receipt — and it cannot, because npm removed uninstall lifecycle scripts in v7 ("there's no clear way to currently give the script enough context to be useful"). An auto-installing `postinstall` would therefore be a one-way door: files written into `$HOME` with no supported mechanism to remove them. The explicit installer plus a receipt is the only arrangement here that fully reverses itself.
+
+> **Order matters.** Remove the content before the package:
+> `npx github:aanyberg/agent-conventions uninstall -g`, then `npm uninstall` if you installed it globally. > The other order leaves the files in place with the tool gone — recoverable, since the receipt is still on > disk and `npx` re-fetches, but avoidable.
 
 ## Validation
 

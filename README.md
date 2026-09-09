@@ -13,6 +13,28 @@ These components enhance AI coding assistants by providing domain knowledge, cod
 
 ## Installation
 
+### Everything, one command
+
+```bash
+# this machine, every project — skills and global instructions
+npx @aanyberg/agent-conventions@latest -g
+
+# preview without writing anything
+npx @aanyberg/agent-conventions@latest -g --dry-run
+```
+
+Run bare, it asks for scope and agents, prints every path it will touch, and defaults to **no**. `-y` skips the prompt but still prints the plan. Nothing global is written without the paths appearing on screen first.
+
+It writes a receipt, so `uninstall` removes exactly what was installed and nothing else:
+
+```bash
+npx @aanyberg/agent-conventions@latest uninstall -g
+```
+
+**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path is already a **symlink** — which it will be if you followed the older setup below — the installer refuses it rather than writing through the link into your clone. `--replace-symlinks` converts it, leaving the file it pointed at untouched.
+
+Your project's own `AGENTS.md` is never written. That file is yours.
+
 ### Skills — any agent
 
 The skills follow the [Agent Skills specification](https://agentskills.io/specification), so one copy works in every agent that reads it. Install them with the ecosystem's CLI:
@@ -104,7 +126,8 @@ so the single copy stays installable in every other agent, and runs the shipped 
 scripts end to end in throwaway git repos.
 
 ```bash
-uv run --frozen pytest tests
+uv run --frozen pytest tests   # structure, skills, agents, manifests
+node --test tests-js/           # the installer
 ```
 
 It takes about two seconds and needs no API access or GitHub auth — `gh` is stubbed.
@@ -115,6 +138,7 @@ What it checks:
 
 | Area | Checks |
 | --- | --- |
+| Installer | the CLI runs end to end against a throwaway `HOME`: both scopes, symlink and copy modes, idempotent reinstall, and an uninstall that restores a pre-existing file byte-for-byte and leaves a foreign skill in the same directory alone. The symlink guard has its own tests — the one failure mode here that destroys data rather than annoying someone |
 | Install manifests | the four ecosystem manifests parse, declare the same version, and point at the same `skills/`; `plugin.json` matches the Agent Plugins name grammar and carries no key outside its schema, which sets `additionalProperties: false` so an extra key invalidates the file rather than being ignored |
 | Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |
 | Skills | frontmatter has `name` and `description`, `name` matches the directory, names are unique, descriptions fit the loader budget, and every key is one the Agent Skills spec permits — `version` is not one of them, it belongs inside `metadata` |

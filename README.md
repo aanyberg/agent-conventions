@@ -119,6 +119,62 @@ ln -s /path/to/agent-conventions/AGENTS.md ~/.codex/AGENTS.md
 
 Replace `/path/to/agent-conventions` with the absolute path to your local clone, e.g. `/home/<username>/projects/agent-conventions`.
 
+## Removing
+
+Whatever put this on your machine is what takes it off — the routes do not clean up after each other.
+
+| Installed with | Remove with |
+| --- | --- |
+| `npx github:aanyberg/agent-conventions` | `npx github:aanyberg/agent-conventions uninstall -g` (or `-p`) |
+| `npx skills add …` | `npx skills remove -g` |
+| `claude plugin install` | `claude plugin uninstall conventions@aanyberg` |
+| `claude plugin marketplace add` | `claude plugin marketplace remove aanyberg` |
+| `gemini extensions install` | see `gemini extensions --help` |
+
+### What the installer's uninstall removes
+
+It works from the receipt written at install time, so it removes **exactly** what was installed and nothing adjacent:
+
+- every skill directory it created, and the links it made into `.claude/skills/`
+- its block from each instruction file, leaving your own content byte-for-byte as it was — and deleting the file outright only if the installer created it and nothing else is in it
+- the receipt itself
+
+A skill someone else put in the same directory is left alone. That is the point of the receipt: removal is never inferred from what an install *would* have produced.
+
+### `npm uninstall` does not do this
+
+`npm uninstall` removes the package and **nothing the installer wrote**. It cannot — npm removed uninstall lifecycle scripts in v7, on the grounds that a removal has too many possible causes to give a script useful context.
+
+So if you installed the package globally, remove the content first and the package second:
+
+```bash
+npx github:aanyberg/agent-conventions uninstall -g
+npm uninstall -g @aanyberg/agent-conventions
+```
+
+The other order strands the files with the tool gone. Recoverable — the receipt is still on disk and `npx` re-fetches — but avoidable.
+
+### By hand
+
+If the receipt is gone, or you would rather see exactly what is there, these are all the paths the installer ever writes. Substitute the project root for `~` if you installed with `-p`:
+
+```bash
+~/.agents/skills/          # the 19 skills — the real files
+~/.claude/skills/          # links into the above
+~/.agent-conventions.json  # the receipt
+```
+
+Instruction files are edited, not created wholesale, so delete only the block between the markers and leave the rest:
+
+```bash
+~/.claude/CLAUDE.md
+~/.copilot/copilot-instructions.md
+~/.codex/AGENTS.md
+~/.gemini/GEMINI.md
+```
+
+Each block is delimited by `<!-- BEGIN aanyberg/agent-conventions -->` and `<!-- END aanyberg/agent-conventions -->`. Anything outside those markers was yours.
+
 ## Releasing
 
 Six manifests declare a version. Set them together, never by hand:
@@ -146,8 +202,7 @@ There is deliberately **no `postinstall` hook**. `npm install` does nothing on i
 
 That is not only a matter of taste. `npm uninstall` removes the package and **nothing the installer wrote** — not the skills, not the instruction blocks, not the receipt — and it cannot, because npm removed uninstall lifecycle scripts in v7 ("there's no clear way to currently give the script enough context to be useful"). An auto-installing `postinstall` would therefore be a one-way door: files written into `$HOME` with no supported mechanism to remove them. The explicit installer plus a receipt is the only arrangement here that fully reverses itself.
 
-> **Order matters.** Remove the content before the package:
-> `npx github:aanyberg/agent-conventions uninstall -g`, then `npm uninstall` if you installed it globally. > The other order leaves the files in place with the tool gone — recoverable, since the receipt is still on > disk and `npx` re-fetches, but avoidable.
+See [Removing](#removing) for how to take any of this back off.
 
 ## Validation
 

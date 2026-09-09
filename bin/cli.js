@@ -261,15 +261,19 @@ async function runUninstall(opts) {
   for (const dir of receipt.skills?.dirs ?? []) fs.rmSync(dir, { recursive: true, force: true })
   for (const item of receipt.instructions ?? []) {
     try {
-      if (item.applied === 'create' || item.applied === 'replaced-symlink') {
+      // Always strip the block and judge by what is left, even for a file this
+      // installer created. Keying off `applied === 'create'` and deleting
+      // outright would take anything the user added to that file afterwards —
+      // a small data-loss case, but the same class as the symlink one.
+      const text = fs.readFileSync(item.file, 'utf8')
+      const stripped = removeBlock(text)
+      if (stripped === '') {
         fs.rmSync(item.file, { force: true })
+        console.log(`removed  ${item.file}`)
       } else {
-        const text = fs.readFileSync(item.file, 'utf8')
-        const stripped = removeBlock(text)
-        if (stripped === '') fs.rmSync(item.file, { force: true })
-        else fs.writeFileSync(item.file, stripped, 'utf8')
+        fs.writeFileSync(item.file, stripped, 'utf8')
+        console.log(`stripped ${item.file} (kept your content)`)
       }
-      console.log(`removed  ${item.file}`)
     } catch (err) {
       console.error(`skipped  ${item.file}: ${err.message}`)
     }

@@ -1,0 +1,6 @@
+{
+  "name": "agent-conventions",
+  "version": "1.0.0",
+  "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows.",
+  "skills": "./skills/"
+}

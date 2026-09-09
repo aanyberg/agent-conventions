@@ -8,7 +8,12 @@
     {
       "name": "conventions",
       "source": ".",
-      "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows."
+      "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows.",
+      "version": "1.0.0"
     }
-  ]
+  ],
+  "metadata": {
+    "description": "Alexander Nyberg's Claude Code plugins for conventions and workflows.",
+    "version": "1.0.0"
+  }
 }

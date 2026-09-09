@@ -15,7 +15,7 @@ import readline from 'node:readline/promises'
 import { fileURLToPath } from 'node:url'
 
 import { buildPlan, renderDisclosure } from '../src/plan.js'
-import { SELECTABLE_AGENTS } from '../src/targets.js'
+import { SELECTABLE_AGENTS, parseAgentSelection } from '../src/targets.js'
 import {
   applyInstructionWrite, installSkill, linkSkill, readReceipt, removeBlock, writeReceipt,
 } from '../src/write.js'
@@ -124,28 +124,33 @@ async function promptForScope(rl) {
 }
 
 async function promptForAgents(rl, scope, detected) {
+  const all = SELECTABLE_AGENTS.map((a) => a.id)
+
   if (scope === 'project') {
-    // One write covers every agent but Claude Code, so there is nothing to pick.
-    console.log('\n.agents/skills/ covers Codex, GitHub Copilot, OpenCode, Cursor, Gemini CLI and others.')
-    console.log('Claude Code reads only .claude/skills/.\n')
+    // One write to .agents/skills already serves every agent here, so the only
+    // real choice is whether to bridge Claude Code — which reads its own path.
+    // Say so explicitly: "all agents" is the default, not something to opt into.
+    console.log('\nInstalling for ALL agents. One .agents/skills/ directory covers Codex,')
+    console.log('GitHub Copilot, OpenCode, Cursor, Gemini CLI and others.\n')
+    console.log('Claude Code is the exception — it reads only .claude/skills/.\n')
     const answer = await ask(rl, 'Also link Claude Code? [Y/n]: ', 'y')
-    const claude = !answer.toLowerCase().startsWith('n')
-    return claude ? SELECTABLE_AGENTS.map((a) => a.id) : SELECTABLE_AGENTS.map((a) => a.id).filter((a) => a !== 'claude-code')
+    return answer.toLowerCase().startsWith('n') ? all.filter((a) => a !== 'claude-code') : all
   }
+
   console.log('\nInstall for which agents?\n')
   SELECTABLE_AGENTS.forEach((a, i) => {
     const mark = detected.includes(a.id) ? '*' : ' '
     console.log(`  ${mark} ${i + 1}) ${a.label}`)
   })
+  console.log('\n    a) All of the above')
   console.log('\n  * = detected on this machine')
-  const preset = detected.length ? detected : SELECTABLE_AGENTS.map((a) => a.id)
-  const answer = await ask(rl, `\nNumbers, or Enter for detected [${preset.join(', ')}]: `, '')
-  if (!answer) return preset
-  return answer
-    .split(/[,\s]+/).filter(Boolean)
-    .map((n) => SELECTABLE_AGENTS[Number(n) - 1])
-    .filter(Boolean)
-    .map((a) => a.id)
+  const preset = detected.length ? detected : all
+  const answer = await ask(rl, `\nNumbers, "a" for all, or Enter for detected [${preset.join(', ')}]: `, '')
+  const { agents, reason } = parseAgentSelection(answer, { preset })
+  if (reason === 'unrecognised') {
+    console.log(`Nothing recognised in "${answer}" — using the detected set.`)
+  }
+  return agents
 }
 
 async function runInstall(opts) {

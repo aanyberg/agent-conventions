@@ -14,7 +14,11 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - run: uv run --frozen pytest tests
+      - run: node --test tests-js/
 
   # BSD and GNU sed disagree, and that has already produced a real bug here.
   # The known cases are caught statically on Linux by test_no_gnu_only_*, which
@@ -30,4 +34,8 @@ jobs:
       - uses: astral-sh/setup-uv@v5
         with:
           enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
       - run: uv run --frozen pytest tests
+      - run: node --test tests-js/

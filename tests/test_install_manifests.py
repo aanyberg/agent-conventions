@@ -55,6 +55,7 @@ VERSIONED = {
     ".codex-plugin/plugin.json": lambda d: d["version"],
     ".claude-plugin/plugin.json": lambda d: d["version"],
     ".claude-plugin/marketplace.json": lambda d: d["metadata"]["version"],
+    "package.json": lambda d: d["version"],
 }
 
 MANIFESTS = [
@@ -63,6 +64,7 @@ MANIFESTS = [
     ".codex-plugin/plugin.json",
     ".claude-plugin/plugin.json",
     ".claude-plugin/marketplace.json",
+    "package.json",
 ]
 
 

@@ -1,0 +1,47 @@
+{
+  "name": "@aanyberg/agent-conventions",
+  "version": "1.0.0",
+  "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows — installable into Claude Code, Codex, GitHub Copilot, OpenCode, Cursor and Gemini CLI.",
+  "type": "module",
+  "license": "MIT",
+  "author": {
+    "name": "Alexander Nyberg"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/aanyberg/agent-conventions.git"
+  },
+  "homepage": "https://github.com/aanyberg/agent-conventions#readme",
+  "bugs": {
+    "url": "https://github.com/aanyberg/agent-conventions/issues"
+  },
+  "keywords": [
+    "agent-skills",
+    "claude-code",
+    "codex",
+    "copilot",
+    "opencode",
+    "cursor",
+    "conventions"
+  ],
+  "bin": {
+    "agent-conventions": "bin/cli.js"
+  },
+  "files": [
+    "bin",
+    "src",
+    "skills",
+    "agents",
+    "AGENTS.md",
+    "plugin.json",
+    "gemini-extension.json",
+    ".claude-plugin",
+    ".codex-plugin"
+  ],
+  "engines": {
+    "node": ">=18.17"
+  },
+  "scripts": {
+    "test": "node --test tests-js/"
+  }
+}

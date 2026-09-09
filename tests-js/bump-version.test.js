@@ -12,7 +12,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { after, before, describe, test } from 'node:test'
+import { after, describe, test } from 'node:test'
 
 import { bump, readVersions } from '../scripts/bump-version.mjs'
 
@@ -22,8 +22,7 @@ const FILES = [
   '.codex-plugin/plugin.json', '.claude-plugin/plugin.json', '.claude-plugin/marketplace.json',
 ]
 
-let tmp
-before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-bump-')) })
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-bump-'))
 after(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
 /** A throwaway copy of the real manifests, so tests never edit the repo. */

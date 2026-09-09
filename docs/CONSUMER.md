@@ -1,6 +1,6 @@
 # Consuming this repo as a plugin
 
-This repo publishes a Claude Code plugin marketplace (`aanyberg`) with one plugin, `conventions`. The repository root *is* the plugin, so its [`skills`](../skills) and [`agents`](../agents) sit at the top level — where the wider agent ecosystem also scans for them. Consumer repos load it directly — no copying or symlinking into `~/.claude`.
+This repo publishes a Claude Code plugin marketplace (`aanyberg`) with one plugin, `conventions`. The repository root *is* the plugin, so its portable [`skills`](../skills) sit at the top level. Canonical [`agent-sources`](../agent-sources) are rendered only by the package installer so provider-specific metadata never leaks into another provider. Consumer repos load plugin skills directly — no copying or symlinking into `~/.claude`.
 
 ## `.claude/settings.json`
 
@@ -30,7 +30,7 @@ Add the marketplace and enable the plugin in the consumer repo's `.claude/settin
 
 ## Not using Claude Code?
 
-The skills in this repo are portable — [`skills/`](../skills) follows the [Agent Skills specification](https://agentskills.io/specification), so Codex, GitHub Copilot, OpenCode, Cursor and Gemini CLI can all load the same copy. The rest of this document covers the Claude Code plugin route specifically; for the others see **Skills — any agent** in the root [README.md](../README.md).
+The skills in this repo are portable — [`skills/`](../skills) follows the [Agent Skills specification](https://agentskills.io/specification), so Codex, GitHub Copilot, OpenCode, Cursor and Gemini CLI can all load the same copy. Agents have no equivalent cross-provider file specification; the package installer renders the canonical definitions into each provider's native format and path. The rest of this document covers the Claude Code plugin route specifically; for other providers see **Agents — every target provider** in the root [README.md](../README.md).
 
 ## `CLAUDE.md` header
 

@@ -9,8 +9,11 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
-import { instructionTargets, receiptPath, skillTargets } from './targets.js'
-import { planInstructionWrite } from './write.js'
+import { bundledAgents, renderAgent } from './agents.js'
+import { agentTargets, instructionTargets, receiptPath, skillTargets } from './targets.js'
+import {
+  planInstructionWrite, planManagedFileRemoval, planManagedFileWrite, readReceipt,
+} from './write.js'
 
 /** Skill directories shipped in this package. */
 export function bundledSkills(packageRoot) {
@@ -31,7 +34,20 @@ export function buildPlan({
   cwd,
   copy = false,
 }) {
-  const plan = { scope, components, mode: copy ? 'copy' : 'symlink', skills: null, instructions: [] }
+  const receipt = receiptPath(scope, { home, cwd })
+  const previousReceipt = readReceipt(receipt)
+  const plan = {
+    scope,
+    components,
+    mode: copy ? 'copy' : 'symlink',
+    skills: null,
+    staleSkillPaths: [],
+    agents: [],
+    staleAgents: [],
+    instructions: [],
+    previousReceipt,
+    receipt,
+  }
 
   if (components.includes('skills')) {
     const targets = skillTargets(scope, { home, cwd })
@@ -45,6 +61,38 @@ export function buildPlan({
       sources: skills,
       links,
     }
+    const desiredSkillPaths = new Set([
+      ...skills.map((skill) => path.join(targets.canonical, skill.name)),
+      ...links.flatMap((link) => skills.map((skill) => path.join(link.dir, skill.name))),
+    ])
+    plan.staleSkillPaths = [
+      ...(previousReceipt?.skills?.dirs ?? []),
+      ...(previousReceipt?.skills?.links ?? []),
+    ].filter((file) => !desiredSkillPaths.has(file))
+  }
+
+  if (components.includes('agents')) {
+    const sources = bundledAgents(packageRoot)
+    const owned = new Map((previousReceipt?.agents ?? []).map((entry) => [entry.file, entry]))
+    plan.agents = agentTargets(scope, { home, cwd })
+      .filter((target) => agents.includes(target.agent))
+      .map((target) => ({
+        ...target,
+        files: sources.map((source) => {
+          const content = renderAgent(source, target.agent)
+          const file = path.join(target.dir, `${source.name}${target.suffix}`)
+          return {
+            name: source.name,
+            content,
+            ...planManagedFileWrite(file, content, owned.get(file)),
+          }
+        }),
+      }))
+    const desired = new Set(plan.agents.flatMap((target) => target.files.map((file) => file.file)))
+    const selectedProviders = new Set(plan.agents.map((target) => target.agent))
+    plan.staleAgents = (previousReceipt?.agents ?? [])
+      .filter((entry) => selectedProviders.has(entry.provider) && !desired.has(entry.file))
+      .map(planManagedFileRemoval)
   }
 
   if (components.includes('instructions')) {
@@ -59,7 +107,6 @@ export function buildPlan({
     }
   }
 
-  plan.receipt = receiptPath(scope, { home, cwd })
   return plan
 }
 
@@ -85,6 +132,31 @@ export function renderDisclosure(plan, { packageVersion }) {
     lines.push('')
   }
 
+  if (plan.staleSkillPaths.length) {
+    lines.push('  stale managed skill paths removed during update:')
+    for (const file of plan.staleSkillPaths) lines.push(`      remove    ${file}`)
+    lines.push('')
+  }
+
+  if (plan.agents.length) {
+    for (const target of plan.agents) {
+      lines.push(`  ${target.dir}`)
+      lines.push(`      ${target.files.length} generated agents for ${target.label}`)
+      for (const file of target.files) {
+        lines.push(`      ${file.action.padEnd(9)} ${file.file}`)
+      }
+    }
+    lines.push('')
+  }
+
+  if (plan.staleAgents.length) {
+    lines.push('  stale generated agents:')
+    for (const item of plan.staleAgents) {
+      lines.push(`      ${item.action.padEnd(9)} ${item.file} (${item.detail})`)
+    }
+    lines.push('')
+  }
+
   if (plan.instructionsSkipped) {
     lines.push(`  instructions: skipped — ${plan.instructionsSkipped}`)
     lines.push('')
@@ -101,13 +173,23 @@ export function renderDisclosure(plan, { packageVersion }) {
     lines.push('')
   }
 
-  const refusals = plan.instructions.filter((i) => i.action.startsWith('refuse'))
-  if (refusals.length) {
+  const instructionRefusals = plan.instructions.filter((item) => item.action.startsWith('refuse'))
+  if (instructionRefusals.length) {
     lines.push('  REFUSED without --replace-symlinks:')
-    for (const r of refusals) {
+    for (const r of instructionRefusals) {
       lines.push(`    ${r.file} is a ${r.detail}`)
     }
     lines.push('    Writing through a symlink would modify the file it points at.')
+    lines.push('')
+  }
+
+  const agentRefusals = plan.agents.flatMap(
+    (target) => target.files.filter((file) => file.action === 'refuse'),
+  )
+  if (agentRefusals.length) {
+    lines.push('  REFUSED generated agent writes:')
+    for (const item of agentRefusals) lines.push(`    ${item.file}: ${item.detail}`)
+    lines.push('    Only byte-identical files recorded in this package receipt may be replaced.')
     lines.push('')
   }
 

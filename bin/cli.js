@@ -17,7 +17,8 @@ import { fileURLToPath } from 'node:url'
 import { buildPlan, renderDisclosure } from '../src/plan.js'
 import { SELECTABLE_AGENTS, parseAgentSelection } from '../src/targets.js'
 import {
-  applyInstructionWrite, installSkill, linkSkill, readReceipt, removeBlock, writeReceipt,
+  applyInstructionWrite, applyManagedFileWrite, installSkill, linkSkill,
+  readReceipt, removeBlock, removeManagedFile, writeReceipt,
 } from '../src/write.js'
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -34,8 +35,8 @@ Options
   -p, --project           install into the current project only
   -a, --agent <list>      comma-separated, or "all" (claude-code, codex,
                           github-copilot, opencode, cursor, gemini-cli)
-  -c, --components <list> skills,instructions  (default: both at global scope,
-                          skills only at project scope)
+  -c, --components <list> skills,agents,instructions  (default: all at global
+                          scope, skills and agents at project scope)
       --copy              copy instead of symlinking
       --replace-symlinks  replace an existing instruction symlink with a real
                           file. Without this, a symlink is refused rather than
@@ -176,7 +177,9 @@ async function runInstall(opts) {
 
   const components = opts.components
     ? opts.components.split(',').map((s) => s.trim()).filter(Boolean)
-    : scope === 'global' ? ['skills', 'instructions'] : ['skills']
+    : scope === 'global' ? ['skills', 'agents', 'instructions'] : ['skills', 'agents']
+  const unknownComponents = components.filter((component) => !['skills', 'agents', 'instructions'].includes(component))
+  if (unknownComponents.length) throw new Error(`unknown component(s): ${unknownComponents.join(', ')}`)
 
   const plan = buildPlan({ packageRoot: PACKAGE_ROOT, scope, components, agents, home, cwd, copy: opts.copy })
 
@@ -202,10 +205,19 @@ async function runInstall(opts) {
 
   const receipt = {
     package: PKG.name, version: PKG.version, installedAt: new Date().toISOString(),
-    scope, mode: plan.mode, skills: null, instructions: [],
+    scope,
+    mode: plan.mode,
+    skills: plan.skills ? null : (plan.previousReceipt?.skills ?? null),
+    agents: [],
+    instructions: [...(plan.previousReceipt?.instructions ?? [])]
+      .filter((entry) => !plan.instructions.some((item) => item.file === entry.file)),
   }
 
   if (plan.skills) {
+    for (const stale of plan.staleSkillPaths) {
+      fs.rmSync(stale, { recursive: true, force: true })
+      console.log(`removed stale      ${stale}`)
+    }
     const written = []
     for (const skill of plan.skills.sources) {
       const dest = path.join(plan.skills.canonical, skill.name)
@@ -227,6 +239,38 @@ async function runInstall(opts) {
     if (links.length) console.log(`Linked ${links.length} into ${plan.skills.links.map((l) => l.dir).join(', ')} (${mode})`)
   }
 
+  const selectedAgentProviders = new Set(plan.agents.map((target) => target.agent))
+  receipt.agents = (plan.previousReceipt?.agents ?? [])
+    .filter((entry) => !selectedAgentProviders.has(entry.provider))
+
+  for (const item of plan.staleAgents) {
+    const result = removeManagedFile(item)
+    if (result.removed) {
+      console.log(`removed stale      ${item.file}`)
+    } else if (result.reason !== 'already absent') {
+      receipt.agents.push(item)
+      console.error(`kept stale         ${item.file}: ${result.reason}`)
+    }
+  }
+
+  for (const target of plan.agents) {
+    for (const item of target.files) {
+      try {
+        const applied = applyManagedFileWrite(item, item.content)
+        receipt.agents.push({
+          provider: target.agent,
+          name: item.name,
+          file: item.file,
+          sha256: item.desiredDigest,
+        })
+        console.log(`${applied.applied.padEnd(18)} ${item.file}`)
+      } catch (err) {
+        if (item.owned) receipt.agents.push(item.owned)
+        console.error(`SKIPPED            ${item.file}\n                   ${err.message}`)
+      }
+    }
+  }
+
   if (plan.instructions.length) {
     const content = fs.readFileSync(path.join(PACKAGE_ROOT, 'AGENTS.md'), 'utf8')
     for (const item of plan.instructions) {
@@ -236,6 +280,8 @@ async function runInstall(opts) {
         console.log(`${applied.applied.padEnd(18)} ${applied.file}`)
       } catch (err) {
         console.error(`SKIPPED            ${item.file}\n                   ${err.message}`)
+        const previous = plan.previousReceipt?.instructions?.find((entry) => entry.file === item.file)
+        if (previous) receipt.instructions.push(previous)
       }
     }
   }
@@ -264,6 +310,11 @@ async function runUninstall(opts) {
   // Only ever remove what the receipt records. Never infer.
   for (const link of receipt.skills?.links ?? []) fs.rmSync(link, { recursive: true, force: true })
   for (const dir of receipt.skills?.dirs ?? []) fs.rmSync(dir, { recursive: true, force: true })
+  for (const entry of receipt.agents ?? []) {
+    const result = removeManagedFile(entry)
+    if (result.removed) console.log(`removed  ${entry.file}`)
+    else console.error(`kept     ${entry.file}: ${result.reason}`)
+  }
   for (const item of receipt.instructions ?? []) {
     try {
       // Always strip the block and judge by what is left, even for a file this

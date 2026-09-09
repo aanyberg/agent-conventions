@@ -13,16 +13,16 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { after, before, describe, test } from 'node:test'
+import { after, describe, test } from 'node:test'
 
 import {
-  applyInstructionWrite, classify, hasBlock, installSkill, linkSkill,
-  planInstructionWrite, removeBlock, renderBlock, upsertBlock,
+  applyInstructionWrite, applyManagedFileWrite, classify, contentDigest, hasBlock,
+  installSkill, linkSkill, planInstructionWrite, planManagedFileWrite,
+  removeBlock, removeManagedFile, renderBlock, upsertBlock,
 } from '../src/write.js'
 import { MARKER_BEGIN, MARKER_END, parseAgentSelection } from '../src/targets.js'
 
-let tmp
-before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-test-')) })
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-test-'))
 after(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
 const scratch = (name) => {
@@ -182,6 +182,48 @@ describe('skills', () => {
     installSkill(src, dest)
     assert.equal(fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'), 'new')
     assert.ok(!fs.existsSync(path.join(dest, 'STALE.md')), 'stale files must not survive')
+  })
+
+  describe('generated managed files', () => {
+    test('refuses a foreign file and preserves it', () => {
+      const dir = scratch('managed-foreign')
+      const file = path.join(dir, 'agent.md')
+      fs.writeFileSync(file, 'theirs')
+      const plan = planManagedFileWrite(file, 'ours')
+      assert.equal(plan.action, 'refuse')
+      assert.throws(() => applyManagedFileWrite(plan, 'ours'), /unowned/)
+      assert.equal(fs.readFileSync(file, 'utf8'), 'theirs')
+    })
+
+    test('updates an owned unchanged file', () => {
+      const dir = scratch('managed-update')
+      const file = path.join(dir, 'agent.md')
+      fs.writeFileSync(file, 'old')
+      const plan = planManagedFileWrite(file, 'new', { file, sha256: contentDigest('old') })
+      assert.equal(plan.action, 'update')
+      applyManagedFileWrite(plan, 'new')
+      assert.equal(fs.readFileSync(file, 'utf8'), 'new')
+    })
+
+    test('preserves a managed file modified by the user', () => {
+      const dir = scratch('managed-modified')
+      const file = path.join(dir, 'agent.md')
+      fs.writeFileSync(file, 'user edit')
+      const receipt = { file, sha256: contentDigest('installed') }
+      assert.equal(planManagedFileWrite(file, 'updated', receipt).action, 'refuse')
+      const removed = removeManagedFile(receipt)
+      assert.equal(removed.removed, false)
+      assert.equal(removed.reason, 'file was modified')
+      assert.equal(fs.readFileSync(file, 'utf8'), 'user edit')
+    })
+
+    test('removes a byte-identical managed file', () => {
+      const dir = scratch('managed-remove')
+      const file = path.join(dir, 'agent.md')
+      fs.writeFileSync(file, 'installed')
+      assert.equal(removeManagedFile({ file, sha256: contentDigest('installed') }).removed, true)
+      assert.equal(fs.existsSync(file), false)
+    })
   })
 
   test('linkSkill creates a relative symlink that resolves', () => {

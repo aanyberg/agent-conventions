@@ -33,6 +33,29 @@ export function skillTargets(scope, { home = os.homedir(), cwd = process.cwd() }
   }
 }
 
+/** Provider-native custom-agent directories and filename conventions. */
+export function agentTargets(scope, { home = os.homedir(), cwd = process.cwd() } = {}) {
+  const root = scope === 'global' ? home : cwd
+  return [
+    { agent: 'claude-code', label: 'Claude Code', dir: path.join(root, '.claude', 'agents'), suffix: '.md' },
+    { agent: 'codex', label: 'Codex', dir: path.join(root, '.codex', 'agents'), suffix: '.toml' },
+    {
+      agent: 'github-copilot',
+      label: 'GitHub Copilot',
+      dir: scope === 'global' ? path.join(root, '.copilot', 'agents') : path.join(root, '.github', 'agents'),
+      suffix: '.agent.md',
+    },
+    {
+      agent: 'opencode',
+      label: 'OpenCode',
+      dir: scope === 'global' ? path.join(root, '.config', 'opencode', 'agents') : path.join(root, '.opencode', 'agents'),
+      suffix: '.md',
+    },
+    { agent: 'cursor', label: 'Cursor', dir: path.join(root, '.cursor', 'agents'), suffix: '.md' },
+    { agent: 'gemini-cli', label: 'Gemini CLI', dir: path.join(root, '.gemini', 'agents'), suffix: '.md' },
+  ]
+}
+
 /**
  * Instructions: global only, and never the project's own AGENTS.md.
  *

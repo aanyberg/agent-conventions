@@ -14,6 +14,7 @@
  */
 
 import fs from 'node:fs'
+import crypto from 'node:crypto'
 import path from 'node:path'
 import { MARKER_BEGIN, MARKER_END } from './targets.js'
 
@@ -135,6 +136,76 @@ export function applyInstructionWrite(plan, content, { replaceSymlinks = false }
   const existing = plan.action === 'create' ? '' : fs.readFileSync(plan.file, 'utf8')
   fs.writeFileSync(plan.file, upsertBlock(existing, content), 'utf8')
   return { ...plan, applied: plan.action }
+}
+
+export function contentDigest(content) {
+  return crypto.createHash('sha256').update(content).digest('hex')
+}
+
+/** Plan a generated whole-file write without claiming an unowned path. */
+export function planManagedFileWrite(file, content, owned = null) {
+  const desiredDigest = contentDigest(content)
+  const at = classify(file)
+  if (at.kind === 'absent') {
+    return { file, action: 'create', detail: 'creates file', desiredDigest, owned }
+  }
+  if (at.kind === 'directory') {
+    return { file, action: 'refuse', detail: 'a directory exists here', desiredDigest, owned }
+  }
+  if (at.kind === 'symlink') {
+    return {
+      file, action: 'refuse', detail: `symlink → ${at.resolved}`, desiredDigest, owned,
+    }
+  }
+  if (!owned) {
+    return { file, action: 'refuse', detail: 'an unowned file exists here', desiredDigest, owned }
+  }
+  const currentDigest = contentDigest(fs.readFileSync(file))
+  if (currentDigest !== owned.sha256) {
+    return {
+      file, action: 'refuse', detail: 'managed file was modified', desiredDigest, owned,
+    }
+  }
+  return {
+    file,
+    action: currentDigest === desiredDigest ? 'unchanged' : 'update',
+    detail: currentDigest === desiredDigest ? 'already current' : 'updates managed file',
+    desiredDigest,
+    owned,
+  }
+}
+
+export function applyManagedFileWrite(plan, content) {
+  if (plan.action === 'refuse') throw new Error(`${plan.file}: ${plan.detail}`)
+  if (plan.action !== 'unchanged') {
+    fs.mkdirSync(path.dirname(plan.file), { recursive: true })
+    fs.writeFileSync(plan.file, content, 'utf8')
+  }
+  return { ...plan, applied: plan.action }
+}
+
+/** Remove a generated file only while it is still byte-identical to our receipt. */
+export function removeManagedFile(entry) {
+  const at = classify(entry.file)
+  if (at.kind === 'absent') return { ...entry, removed: false, reason: 'already absent' }
+  if (at.kind !== 'file') return { ...entry, removed: false, reason: `path is a ${at.kind}` }
+  const currentDigest = contentDigest(fs.readFileSync(entry.file))
+  if (currentDigest !== entry.sha256) {
+    return { ...entry, removed: false, reason: 'file was modified' }
+  }
+  fs.rmSync(entry.file, { force: true })
+  return { ...entry, removed: true }
+}
+
+export function planManagedFileRemoval(entry) {
+  const at = classify(entry.file)
+  if (at.kind === 'absent') return { ...entry, action: 'forget', detail: 'already absent' }
+  if (at.kind !== 'file') return { ...entry, action: 'keep', detail: `path is a ${at.kind}` }
+  const currentDigest = contentDigest(fs.readFileSync(entry.file))
+  if (currentDigest !== entry.sha256) {
+    return { ...entry, action: 'keep', detail: 'managed file was modified' }
+  }
+  return { ...entry, action: 'remove', detail: 'removes stale managed file' }
 }
 
 /** Copy a skill directory, replacing any previous copy of the same skill. */

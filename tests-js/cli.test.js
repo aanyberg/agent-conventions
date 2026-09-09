@@ -10,17 +10,17 @@
 
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
+import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { after, before, describe, test } from 'node:test'
+import { after, describe, test } from 'node:test'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const CLI = path.join(ROOT, 'bin', 'cli.js')
 
-let tmp
-before(() => { tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-cli-')) })
+const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ac-cli-'))
 after(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
 /** Run the CLI with an isolated HOME and cwd. Never touches the real machine. */
@@ -46,7 +46,7 @@ function sandbox(name) {
 }
 
 describe('project scope', () => {
-  test('writes exactly two directories and links Claude Code into the first', () => {
+  test('installs portable skills and provider-native agents', () => {
     const { home, project } = sandbox('project-basic')
     run(['-p', '-a', 'all', '-y'], { home, cwd: project })
 
@@ -56,13 +56,20 @@ describe('project scope', () => {
     assert.ok(fs.existsSync(claude), '.claude/skills must exist for Claude Code')
 
     const names = fs.readdirSync(canonical).sort()
-    assert.ok(names.length >= 19, `expected the bundled skills, got ${names.length}`)
+    assert.ok(names.length >= 17, `expected the bundled skills, got ${names.length}`)
     assert.ok(names.includes('git-conventions'))
 
     // Claude's entries are links into the canonical copy, not duplicates.
     const entry = path.join(claude, 'git-conventions')
     assert.ok(fs.lstatSync(entry).isSymbolicLink(), 'Claude entries must be links, not copies')
     assert.ok(fs.existsSync(path.join(entry, 'SKILL.md')), 'the link must resolve')
+
+    assert.ok(fs.existsSync(path.join(project, '.claude', 'agents', 'conventions-code-reviewer.md')))
+    assert.ok(fs.existsSync(path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')))
+    assert.ok(fs.existsSync(path.join(project, '.github', 'agents', 'conventions-code-reviewer.agent.md')))
+    assert.ok(fs.existsSync(path.join(project, '.opencode', 'agents', 'conventions-code-reviewer.md')))
+    assert.ok(fs.existsSync(path.join(project, '.cursor', 'agents', 'conventions-code-reviewer.md')))
+    assert.ok(fs.existsSync(path.join(project, '.gemini', 'agents', 'conventions-code-reviewer.md')))
   })
 
   test('does not write instructions at project scope', () => {
@@ -120,6 +127,36 @@ describe('global scope', () => {
     assert.equal(twice, once, 'install must be idempotent')
     assert.equal(twice.match(/BEGIN aanyberg/g).length, 1, 'exactly one block')
   })
+
+  test('an agents-only refresh preserves other component receipts', () => {
+    const { home } = sandbox('global-partial-refresh')
+    run(['-g', '-a', 'claude-code', '-y'], { home })
+    run(['-g', '-a', 'claude-code', '-c', 'agents', '-y'], { home })
+
+    const receipt = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(receipt.skills?.dirs.length, 'skills ownership must survive a partial refresh')
+    assert.ok(receipt.instructions.length, 'instruction ownership must survive a partial refresh')
+
+    run(['uninstall', '-g'], { home })
+    assert.ok(!fs.existsSync(path.join(home, '.agents', 'skills', 'git-conventions')))
+    assert.ok(!fs.existsSync(path.join(home, '.claude', 'CLAUDE.md')))
+  })
+
+  test('a skills refresh removes obsolete paths recorded by the previous receipt', () => {
+    const { home, project } = sandbox('stale-skill')
+    run(['-p', '-a', 'codex', '-c', 'skills', '-y'], { home, cwd: project })
+
+    const receiptPath = path.join(project, '.agent-conventions.json')
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    const stale = path.join(project, '.agents', 'skills', 'retired-skill')
+    fs.mkdirSync(stale, { recursive: true })
+    fs.writeFileSync(path.join(stale, 'SKILL.md'), 'retired')
+    receipt.skills.dirs.push(stale)
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n')
+
+    run(['-p', '-a', 'codex', '-c', 'skills', '-y'], { home, cwd: project })
+    assert.ok(!fs.existsSync(stale), 'an obsolete package-owned skill path must be removed')
+  })
 })
 
 describe('the symlink case, end to end', () => {
@@ -167,6 +204,7 @@ describe('dry run and disclosure', () => {
     const out = run(['-p', '-a', 'all', '--dry-run'], { home, cwd: project })
     assert.match(out, /nothing was written/)
     assert.match(out, /\.agents[/\\]skills/)
+    assert.match(out, /\.codex[/\\]agents/)
     assert.ok(!fs.existsSync(path.join(project, '.agents')), 'dry run must not create anything')
   })
 
@@ -219,6 +257,58 @@ describe('uninstall', () => {
     assert.ok(fs.existsSync(path.join(foreign, 'SKILL.md')), 'a foreign skill must survive uninstall')
   })
 
+  test('preserves a generated agent modified after installation', () => {
+    const { home, project } = sandbox('uninstall-modified-agent')
+    run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    const agent = path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')
+    fs.appendFileSync(agent, '\n# user note\n')
+
+    const update = run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    assert.match(update, /REFUSED/)
+    assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
+
+    run(['uninstall', '-p'], { home, cwd: project })
+    assert.ok(fs.existsSync(agent), 'a modified generated agent must survive uninstall')
+    assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
+  })
+
+  test('refuses a foreign agent collision and never claims it in the receipt', () => {
+    const { home, project } = sandbox('foreign-agent')
+    const agent = path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')
+    fs.mkdirSync(path.dirname(agent), { recursive: true })
+    fs.writeFileSync(agent, 'foreign')
+
+    const output = run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    assert.match(output, /REFUSED/)
+    assert.equal(fs.readFileSync(agent, 'utf8'), 'foreign')
+
+    run(['uninstall', '-p'], { home, cwd: project })
+    assert.equal(fs.readFileSync(agent, 'utf8'), 'foreign')
+  })
+
+  test('removes a stale generated agent during an update', () => {
+    const { home, project } = sandbox('stale-agent')
+    run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+
+    const receiptPath = path.join(project, '.agent-conventions.json')
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    const stale = path.join(project, '.codex', 'agents', 'conventions-retired.toml')
+    const content = 'retired'
+    fs.writeFileSync(stale, content)
+    receipt.agents.push({
+      provider: 'codex',
+      name: 'conventions-retired',
+      file: stale,
+      sha256: crypto.createHash('sha256').update(content).digest('hex'),
+    })
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n')
+
+    run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    assert.ok(!fs.existsSync(stale), 'a byte-identical stale managed agent must be removed')
+    const updated = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    assert.ok(!updated.agents.some((entry) => entry.file === stale), 'stale entry must leave the receipt')
+  })
+
   test('reports plainly when there is nothing to uninstall', () => {
     const { home } = sandbox('uninstall-empty')
     const out = run(['uninstall', '-g'], { home, expectFail: true })
@@ -238,6 +328,12 @@ describe('argument handling', () => {
     const { home } = sandbox('bad-flag')
     const out = run(['--nonsense'], { home, expectFail: true })
     assert.match(out, /unknown option/)
+  })
+
+  test('rejects an unknown component', () => {
+    const { home } = sandbox('bad-component')
+    const out = run(['-g', '-c', 'widgets', '-y'], { home, expectFail: true })
+    assert.match(out, /unknown component/)
   })
 
   test('--help exits cleanly', () => {

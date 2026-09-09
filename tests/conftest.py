@@ -56,15 +56,35 @@ def load_marketplace() -> dict:
 
 
 def plugin_dirs() -> list[Path]:
-    return sorted(p.parents[1] for p in REPO_ROOT.glob("plugins/*/.claude-plugin/plugin.json"))
+    """Directories holding a plugin manifest.
+
+    The repo root is itself the plugin (`marketplace.json` declares `source: "."`),
+    so `skills/` and `agents/` sit at the top level where the wider agent ecosystem
+    scans for them. `plugins/*` is still honoured so a second plugin can be added
+    later without reworking the suite.
+    """
+    candidates = [REPO_ROOT, *sorted(REPO_ROOT.glob("plugins/*"))]
+    return [d for d in candidates if (d / ".claude-plugin" / "plugin.json").is_file()]
+
+
+def marketplace_entry_for(plugin_dir: Path) -> dict | None:
+    """The marketplace entry whose `source` resolves to this plugin directory.
+
+    Identity comes from the manifest pair, not the directory name: the root
+    plugin is named `conventions` while its directory is the repo itself.
+    """
+    for entry in load_marketplace()["plugins"]:
+        if (REPO_ROOT / entry["source"]).resolve() == plugin_dir.resolve():
+            return entry
+    return None
 
 
 def skill_files() -> list[Path]:
-    return sorted(REPO_ROOT.glob("plugins/*/skills/*/SKILL.md"))
+    return sorted(REPO_ROOT.glob("skills/*/SKILL.md"))
 
 
 def agent_files() -> list[Path]:
-    return sorted(REPO_ROOT.glob("plugins/*/agents/*.md"))
+    return sorted(REPO_ROOT.glob("agents/*.md"))
 
 
 def markdown_files() -> list[Path]:

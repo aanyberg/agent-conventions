@@ -9,7 +9,7 @@ import yaml
 
 from conftest import agent_files, repo_root, skill_files
 
-TEMPLATE = repo_root() / "plugins" / "conventions" / "policy.example.yml"
+TEMPLATE = repo_root() / "policy.example.yml"
 
 # Policy keys as written in skill and agent prose, in both forms used:
 # `policy.git.branch_format` and the bare `git.branch_format`.
@@ -69,7 +69,7 @@ def test_there_is_exactly_one_policy_template():
         for p in repo_root().rglob("policy.example.yml")
         if ".git" not in p.parts
     )
-    assert copies == ["plugins/conventions/policy.example.yml"], (
+    assert copies == ["policy.example.yml"], (
         f"expected a single policy template, found {copies}"
     )
 

@@ -1,5 +1,5 @@
 {
-  "name": "lahnvik",
+  "name": "aanyberg",
   "description": "Alexander Nyberg's Claude Code plugins for conventions and workflows.",
   "owner": {
     "name": "Alexander Nyberg"
@@ -7,7 +7,7 @@
   "plugins": [
     {
       "name": "conventions",
-      "source": "./plugins/conventions",
+      "source": ".",
       "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows."
     }
   ]

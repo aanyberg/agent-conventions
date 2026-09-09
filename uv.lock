@@ -3,7 +3,7 @@ revision = 3
 requires-python = ">=3.11"
 
 [[package]]
-name = "agent-configs"
+name = "agent-conventions"
 version = "0"
 source = { virtual = "." }
 

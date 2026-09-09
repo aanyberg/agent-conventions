@@ -18,10 +18,10 @@ import yaml
 
 from conftest import repo_root
 
-SCRIPTS = repo_root() / "plugins" / "conventions" / "skills" / "backlog-management" / "scripts"
+SCRIPTS = repo_root() / "skills" / "backlog-management" / "scripts"
 DETECT = SCRIPTS / "detect-backend.sh"
 GENERATE = SCRIPTS / "generate-policy.sh"
-TEMPLATE = repo_root() / "plugins" / "conventions" / "policy.example.yml"
+TEMPLATE = repo_root() / "policy.example.yml"
 
 # A `gh` stub driven by env vars, so every case is deterministic regardless of
 # whether the machine running the suite has gh installed or authenticated.
@@ -230,13 +230,18 @@ def test_generate_defaults_to_markdown_without_github(sandbox, stub_bin):
 
 
 def test_generate_fails_loudly_when_the_template_is_missing(sandbox, stub_bin, tmp_path):
-    """The script resolves its template relative to itself, so copy the tree."""
-    copied = tmp_path / "plugin-copy"
-    shutil.copytree(repo_root() / "plugins" / "conventions", copied)
-    (copied / "policy.example.yml").unlink()
+    """The script resolves its template three levels up, so mirror that layout.
 
-    result = run(copied / "skills" / "backlog-management" / "scripts" / "generate-policy.sh",
-                 sandbox, stub_bin)
+    Only the script and the template position are recreated — copying the whole
+    plugin root would now mean copying the entire repository.
+    """
+    copied = tmp_path / "plugin-copy"
+    scripts = copied / "skills" / "backlog-management" / "scripts"
+    scripts.mkdir(parents=True)
+    shutil.copy2(GENERATE, scripts / GENERATE.name)
+    assert not (copied / "policy.example.yml").exists(), "template must be absent for this case"
+
+    result = run(scripts / "generate-policy.sh", sandbox, stub_bin)
     assert result.returncode == 1
     assert "Template not found" in result.stderr
     assert not (sandbox / ".planning" / "policy.yml").exists(), "must not leave a partial file"
@@ -271,7 +276,7 @@ def test_shellcheck_is_available():
 
 
 @pytest.mark.parametrize(
-    "script", sorted(repo_root().glob("plugins/*/skills/*/scripts/*.sh")),
+    "script", sorted(repo_root().glob("skills/*/scripts/*.sh")),
     ids=lambda p: str(p.relative_to(repo_root())),
 )
 def test_shellcheck_is_clean(script):
@@ -318,7 +323,7 @@ def _regex_lines(script: Path) -> list[tuple[int, str]]:
 
 
 @pytest.mark.parametrize(
-    "script", sorted(repo_root().glob("plugins/*/skills/*/scripts/*.sh")),
+    "script", sorted(repo_root().glob("skills/*/scripts/*.sh")),
     ids=lambda p: str(p.relative_to(repo_root())),
 )
 def test_no_gnu_only_regex_escapes(script):
@@ -335,7 +340,7 @@ def test_no_gnu_only_regex_escapes(script):
 
 
 @pytest.mark.parametrize(
-    "script", sorted(repo_root().glob("plugins/*/skills/*/scripts/*.sh")),
+    "script", sorted(repo_root().glob("skills/*/scripts/*.sh")),
     ids=lambda p: str(p.relative_to(repo_root())),
 )
 def test_no_gnu_only_flags(script):

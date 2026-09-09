@@ -1,0 +1,86 @@
+name: release
+
+# Publishing is deliberately tag-triggered rather than merge-triggered, and it
+# re-runs the full suite rather than trusting that merge-time checks ran.
+# `--admin` merges bypass required status checks as well as the approval rule,
+# so "it was green on the PR" is not something a publish can assume.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # The tag is the release's identity. If it disagrees with package.json,
+      # npm would publish a version nobody can find from the git history.
+      - name: Tag must match the manifests
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          echo "Tag says: $tag"
+          node scripts/bump-version.mjs "$tag" --check
+
+      - run: uv run --frozen pytest tests
+      - run: node --test tests-js/
+
+      # Catch a broken `files` list before publishing rather than after: an
+      # omitted skills/ directory produces a package that installs nothing.
+      - name: Packed tarball must contain the content
+        run: |
+          # `npm pack --silent` prints the filename it wrote. Globbing for
+          # *.tgz instead would pick the wrong file the moment two exist.
+          tarball="/tmp/$(npm pack --pack-destination /tmp --silent)"
+          echo "TARBALL=$tarball" >> "$GITHUB_ENV"
+          skills=$(tar -tzf "$tarball" | grep -c 'skills/.*/SKILL.md' || true)
+          agents=$(tar -tzf "$tarball" | grep -c 'package/agents/.*\.md' || true)
+          echo "skills=$skills agents=$agents"
+          test "$skills" -ge 19 || { echo "::error::only $skills skills in the tarball"; exit 1; }
+          test "$agents" -ge 7 || { echo "::error::only $agents agents in the tarball"; exit 1; }
+          tar -tzf "$tarball" | grep -q 'package/AGENTS.md' || { echo "::error::AGENTS.md missing"; exit 1; }
+          tar -tzf "$tarball" | grep -q 'package/bin/cli.js' || { echo "::error::bin/cli.js missing"; exit 1; }
+
+      # The installer is what consumers actually run. Prove the packed artifact
+      # works before it is published, not after someone reports that it doesn't.
+      - name: Installed tarball must install
+        run: |
+          home=$(mktemp -d); proj=$(mktemp -d)
+          cd "$proj" && npm init -y >/dev/null && npm i --no-audit --no-fund "$TARBALL" >/dev/null
+          HOME="$home" npx agent-conventions -g -a all -y >/dev/null
+          test -f "$home/.agents/skills/git-conventions/SKILL.md" || { echo "::error::skills not installed"; exit 1; }
+          test -f "$home/.claude/CLAUDE.md" || { echo "::error::instructions not installed"; exit 1; }
+          HOME="$home" npx agent-conventions uninstall -g >/dev/null
+          test ! -e "$home/.agents/skills/git-conventions" || { echo "::error::uninstall left files behind"; exit 1; }
+          echo "install/uninstall round trip OK"
+
+  publish:
+    name: publish to npm
+    needs: verify
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      # Required for npm trusted publishing. The short-lived OIDC token replaces
+      # a stored NPM_TOKEN, so there is no long-lived write credential to leak,
+      # and npm attaches a provenance attestation automatically.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
+
+      # Trusted publishing needs npm >= 11.5.1, which is newer than the npm
+      # bundled with Node 20.
+      - run: npm install -g npm@latest
+
+      - run: npm publish --access public

@@ -117,6 +117,29 @@ ln -s /path/to/agent-conventions/AGENTS.md ~/.codex/AGENTS.md
 
 Replace `/path/to/agent-conventions` with the absolute path to your local clone, e.g. `/home/<username>/projects/agent-conventions`.
 
+## Releasing
+
+Six manifests declare a version. Set them together, never by hand:
+
+```bash
+node scripts/bump-version.mjs 1.1.0
+git commit -am "chore: release 1.1.0"
+git tag v1.1.0 && git push --tags
+```
+
+The tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs both suites rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a publish cannot assume the PR was green. It also verifies the tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it publish.
+
+Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) over OIDC: no `NPM_TOKEN` is stored anywhere, the credential is short-lived and scoped to this one workflow, and npm attaches a provenance attestation automatically.
+
+### One-time setup
+
+Neither step can be scripted from here — both need an authenticated session:
+
+1. **npm** — publish `1.0.0` manually once (`npm publish --access public`), since a trusted publisher can only be added to a package that exists. Then under the package's *Settings → Trusted publishers*, add: repository `aanyberg/agent-conventions`, workflow `release.yml`, environment `release`.
+2. **GitHub** — create an environment named `release` (*Settings → Environments*). Adding yourself as a required reviewer there puts a human approval in front of every publish, which is worth having for a public registry.
+
+Until step 1 is done, `npx @aanyberg/agent-conventions` will not resolve.
+
 ## Validation
 
 Every change is gated by a validation suite. It parses the same files Claude Code
@@ -127,7 +150,7 @@ scripts end to end in throwaway git repos.
 
 ```bash
 uv run --frozen pytest tests   # structure, skills, agents, manifests
-node --test tests-js/           # the installer
+node --test tests-js/           # the installer and the version bump
 ```
 
 It takes about two seconds and needs no API access or GitHub auth — `gh` is stubbed.
@@ -138,6 +161,7 @@ What it checks:
 
 | Area | Checks |
 | --- | --- |
+| Release | the version bump sets all six manifests together, refuses a non-semver input without writing, is idempotent, and leaves every other field and the file formatting untouched. A separate test asserts the six currently agree, so drift fails a PR rather than a release |
 | Installer | the CLI runs end to end against a throwaway `HOME`: both scopes, symlink and copy modes, idempotent reinstall, and an uninstall that restores a pre-existing file byte-for-byte and leaves a foreign skill in the same directory alone. The symlink guard has its own tests — the one failure mode here that destroys data rather than annoying someone |
 | Install manifests | the four ecosystem manifests parse, declare the same version, and point at the same `skills/`; `plugin.json` matches the Agent Plugins name grammar and carries no key outside its schema, which sets `additionalProperties: false` so an extra key invalidates the file rather than being ignored |
 | Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |

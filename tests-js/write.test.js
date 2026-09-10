@@ -18,7 +18,8 @@ import { after, describe, test } from 'node:test'
 import {
   applyInstructionWrite, applyManagedFileWrite, classify, contentDigest, hasBlock,
   installSkill, linkSkill, planInstructionWrite, planManagedFileWrite,
-  removeBlock, removeManagedFile, renderBlock, upsertBlock,
+  planSkillLinkDirectory, prepareSkillLinkDirectory, removeBlock,
+  removeManagedFile, renderBlock, upsertBlock,
 } from '../src/write.js'
 import { MARKER_BEGIN, MARKER_END, parseAgentSelection } from '../src/targets.js'
 
@@ -226,7 +227,7 @@ describe('skills', () => {
     })
   })
 
-  test('linkSkill creates a relative symlink that resolves', () => {
+  test('linkSkill creates an absolute symlink that resolves', () => {
     const dir = scratch('skill-link')
     const canonical = path.join(dir, '.agents', 'skills', 'demo')
     fs.mkdirSync(canonical, { recursive: true })
@@ -236,7 +237,8 @@ describe('skills', () => {
     const mode = linkSkill(canonical, link)
 
     assert.equal(mode, 'symlink')
-    assert.ok(!path.isAbsolute(fs.readlinkSync(link)), 'must be relative so a clone still resolves')
+    assert.equal(fs.readlinkSync(link), canonical)
+    assert.ok(path.isAbsolute(fs.readlinkSync(link)))
     assert.equal(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8'), 'body')
   })
 
@@ -250,6 +252,73 @@ describe('skills', () => {
     assert.equal(linkSkill(canonical, link, { copy: true }), 'copy')
     assert.equal(fs.lstatSync(link).isSymbolicLink(), false)
     assert.equal(fs.readFileSync(path.join(link, 'SKILL.md'), 'utf8'), 'body')
+  })
+
+  test('linkSkill refuses to write through a provider-directory symlink', () => {
+    const dir = scratch('skill-parent-symlink')
+    const canonical = path.join(dir, 'canonical', 'demo')
+    fs.mkdirSync(canonical, { recursive: true })
+    fs.writeFileSync(path.join(canonical, 'SKILL.md'), 'body')
+
+    const foreign = path.join(dir, 'foreign')
+    fs.mkdirSync(foreign)
+    fs.writeFileSync(path.join(foreign, 'keep.txt'), 'untouched')
+    fs.mkdirSync(path.join(foreign, 'demo'))
+    fs.writeFileSync(path.join(foreign, 'demo', 'SKILL.md'), 'foreign skill')
+    const provider = path.join(dir, '.claude', 'skills')
+    fs.mkdirSync(path.dirname(provider), { recursive: true })
+    fs.symlinkSync(foreign, provider)
+
+    assert.throws(
+      () => linkSkill(canonical, path.join(provider, 'demo')),
+      /refusing to write through/,
+    )
+    assert.equal(fs.readFileSync(path.join(foreign, 'keep.txt'), 'utf8'), 'untouched')
+    assert.equal(
+      fs.readFileSync(path.join(foreign, 'demo', 'SKILL.md'), 'utf8'),
+      'foreign skill',
+    )
+  })
+
+  test('installSkill refuses to replace content through a canonical-directory symlink', () => {
+    const dir = scratch('canonical-parent-symlink')
+    const source = path.join(dir, 'source', 'demo')
+    fs.mkdirSync(source, { recursive: true })
+    fs.writeFileSync(path.join(source, 'SKILL.md'), 'bundled skill')
+
+    const foreign = path.join(dir, 'foreign')
+    const foreignSkill = path.join(foreign, 'demo')
+    fs.mkdirSync(foreignSkill, { recursive: true })
+    fs.writeFileSync(path.join(foreignSkill, 'SKILL.md'), 'foreign skill')
+    fs.writeFileSync(path.join(foreignSkill, 'notes.md'), 'keep me')
+    const canonical = path.join(dir, '.agents', 'skills')
+    fs.mkdirSync(path.dirname(canonical), { recursive: true })
+    fs.symlinkSync(foreign, canonical)
+
+    assert.throws(
+      () => installSkill(source, path.join(canonical, 'demo')),
+      /refusing to write through/,
+    )
+    assert.equal(fs.readFileSync(path.join(foreignSkill, 'SKILL.md'), 'utf8'), 'foreign skill')
+    assert.equal(fs.readFileSync(path.join(foreignSkill, 'notes.md'), 'utf8'), 'keep me')
+  })
+
+  test('explicitly replaces a provider-directory symlink without touching its target', () => {
+    const dir = scratch('skill-parent-replace')
+    const foreign = path.join(dir, 'foreign')
+    fs.mkdirSync(foreign)
+    fs.writeFileSync(path.join(foreign, 'keep.txt'), 'untouched')
+    const provider = path.join(dir, '.claude', 'skills')
+    fs.mkdirSync(path.dirname(provider), { recursive: true })
+    fs.symlinkSync(foreign, provider)
+
+    const plan = planSkillLinkDirectory(provider)
+    assert.equal(plan.action, 'refuse-symlink')
+    const result = prepareSkillLinkDirectory(plan, { replaceSymlinks: true })
+
+    assert.equal(result.applied, 'replaced-symlink')
+    assert.equal(fs.lstatSync(provider).isSymbolicLink(), false)
+    assert.equal(fs.readFileSync(path.join(foreign, 'keep.txt'), 'utf8'), 'untouched')
   })
 })
 

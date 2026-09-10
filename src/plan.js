@@ -12,7 +12,8 @@ import path from 'node:path'
 import { bundledAgents, renderAgent } from './agents.js'
 import { agentTargets, instructionTargets, receiptPath, skillTargets } from './targets.js'
 import {
-  planInstructionWrite, planManagedFileRemoval, planManagedFileWrite, readReceipt,
+  planInstructionWrite, planManagedFileRemoval, planManagedFileWrite,
+  planSkillLinkDirectory, readReceipt,
 } from './write.js'
 
 /** Skill directories shipped in this package. */
@@ -53,9 +54,12 @@ export function buildPlan({
     const targets = skillTargets(scope, { home, cwd })
     const skills = bundledSkills(packageRoot)
     // Claude Code is the only agent needing a link; skip it if unselected.
-    const links = targets.links.filter((l) => agents.includes(l.agent))
+    const links = targets.links
+      .filter((link) => agents.includes(link.agent))
+      .map((link) => ({ ...link, ...planSkillLinkDirectory(link.dir) }))
     plan.skills = {
       canonical: targets.canonical,
+      canonicalPlan: planSkillLinkDirectory(targets.canonical),
       canonicalReadBy: targets.canonicalReadBy,
       names: skills.map((s) => s.name),
       sources: skills,
@@ -124,10 +128,19 @@ export function renderDisclosure(plan, { packageVersion }) {
 
   if (plan.skills) {
     lines.push(`  ${plan.skills.canonical}`)
-    lines.push(`      ${plan.skills.names.length} skills — read by ${plan.skills.canonicalReadBy.join(', ')}`)
+    if (plan.skills.canonicalPlan.action === 'create' ||
+        plan.skills.canonicalPlan.action === 'use') {
+      lines.push(`      ${plan.skills.names.length} skills — read by ${plan.skills.canonicalReadBy.join(', ')}`)
+    } else {
+      lines.push(`      refused: ${plan.skills.canonicalPlan.detail}`)
+    }
     for (const link of plan.skills.links) {
       lines.push(`  ${link.dir}`)
-      lines.push(`      ${plan.mode} → the directory above (${link.label} does not read .agents/skills)`)
+      if (link.action === 'create' || link.action === 'use') {
+        lines.push(`      ${plan.mode} entries → the directory above (${link.label} does not read .agents/skills)`)
+      } else {
+        lines.push(`      refused: ${link.detail}`)
+      }
     }
     lines.push('')
   }
@@ -173,13 +186,40 @@ export function renderDisclosure(plan, { packageVersion }) {
     lines.push('')
   }
 
-  const instructionRefusals = plan.instructions.filter((item) => item.action.startsWith('refuse'))
-  if (instructionRefusals.length) {
+  const replaceableInstructionSymlinks = plan.instructions.filter(
+    (item) => item.action === 'refuse-symlink',
+  )
+  const replaceableSkillSymlinks = plan.skills?.links.filter(
+    (link) => link.action === 'refuse-symlink',
+  ) ?? []
+  const replaceableCanonicalSymlink = plan.skills?.canonicalPlan.action === 'refuse-symlink'
+    ? [plan.skills.canonicalPlan]
+    : []
+  if (replaceableInstructionSymlinks.length || replaceableSkillSymlinks.length ||
+      replaceableCanonicalSymlink.length) {
     lines.push('  REFUSED without --replace-symlinks:')
-    for (const r of instructionRefusals) {
+    for (const link of [...replaceableCanonicalSymlink, ...replaceableSkillSymlinks]) {
+      lines.push(`    ${link.dir} is a ${link.detail}`)
+    }
+    for (const r of replaceableInstructionSymlinks) {
       lines.push(`    ${r.file} is a ${r.detail}`)
     }
-    lines.push('    Writing through a symlink would modify the file it points at.')
+    lines.push('    Writing through a symlink would modify the path it points at.')
+    lines.push('')
+  }
+
+  const pathConflicts = [
+    ...(plan.skills?.canonicalPlan.action === 'refuse'
+      ? [{ file: plan.skills.canonicalPlan.dir, detail: plan.skills.canonicalPlan.detail }]
+      : []),
+    ...(plan.skills?.links.filter((link) => link.action === 'refuse') ?? [])
+      .map((link) => ({ file: link.dir, detail: link.detail })),
+    ...plan.instructions.filter((item) => item.action === 'refuse'),
+  ]
+  if (pathConflicts.length) {
+    lines.push('  REFUSED path conflicts:')
+    for (const item of pathConflicts) lines.push(`    ${item.file}: ${item.detail}`)
+    lines.push('    Move or rename the conflicting path before installing this component.')
     lines.push('')
   }
 

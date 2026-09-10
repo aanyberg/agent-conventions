@@ -38,7 +38,7 @@ It writes a receipt, so `uninstall` removes exactly what was installed and nothi
 npx github:aanyberg/agent-conventions uninstall -g
 ```
 
-**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path or `.claude/skills/` is already a **symlink**, the installer refuses it rather than writing through the link. Other selected providers still install, and the receipt records only successful writes. `--replace-symlinks` converts the link itself to a real path, leaving its target untouched.
+**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path, skills root, or generated-agent directory is itself a **symlink**, the installer refuses it rather than writing through the link. Other selected providers still install, and the receipt records only successful writes. `--replace-symlinks` converts the link itself to a real path, leaving its target untouched.
 
 Your project's own `AGENTS.md` is never written. That file is yours.
 

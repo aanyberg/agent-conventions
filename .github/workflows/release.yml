@@ -85,4 +85,4 @@ jobs:
       # bundled with Node 20.
       - run: npm install -g npm@latest
 
-      - run: npm publish --access public
+      - run: npm stage publish --access public

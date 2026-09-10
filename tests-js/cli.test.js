@@ -9,7 +9,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -25,16 +25,19 @@ after(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
 /** Run the CLI with an isolated HOME and cwd. Never touches the real machine. */
 function run(args, { home, cwd, expectFail = false } = {}) {
-  try {
-    return execFileSync(process.execPath, [CLI, ...args], {
-      cwd: cwd ?? home,
-      encoding: 'utf8',
-      env: { ...process.env, HOME: home, USERPROFILE: home, CI: '1' },
-    })
-  } catch (err) {
-    if (expectFail) return (err.stdout ?? '') + (err.stderr ?? '')
-    throw new Error(`CLI failed: ${err.stdout}\n${err.stderr}`)
-  }
+  const result = runResult(args, { home, cwd })
+  if (result.status === 0) return result.stdout
+  const output = `${result.stdout}${result.stderr}`
+  if (expectFail) return output
+  throw new Error(`CLI failed: ${output}`)
+}
+
+function runResult(args, { home, cwd } = {}) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    cwd: cwd ?? home,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, CI: '1' },
+  })
 }
 
 function sandbox(name) {
@@ -114,7 +117,7 @@ describe('global scope', () => {
     fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
     fs.symlinkSync(missing, claudeSkills)
 
-    const output = run(['-g', '-a', 'all', '-y'], { home })
+    const output = run(['-g', '-a', 'all', '-y'], { home, expectFail: true })
 
     assert.match(output, /REFUSED without --replace-symlinks/)
     assert.ok(fs.lstatSync(claudeSkills).isSymbolicLink())
@@ -135,7 +138,7 @@ describe('global scope', () => {
     fs.mkdirSync(path.dirname(canonical), { recursive: true })
     fs.symlinkSync(missing, canonical)
 
-    const output = run(['-g', '-a', 'all', '-y'], { home })
+    const output = run(['-g', '-a', 'all', '-y'], { home, expectFail: true })
 
     assert.match(output, /REFUSED without --replace-symlinks/)
     assert.ok(fs.lstatSync(canonical).isSymbolicLink())
@@ -188,7 +191,7 @@ describe('global scope', () => {
     fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
     fs.writeFileSync(claudeSkills, 'foreign')
 
-    const output = run(['-g', '-a', 'all', '-y'], { home })
+    const output = run(['-g', '-a', 'all', '-y'], { home, expectFail: true })
 
     assert.match(output, /REFUSED path conflicts/)
     assert.match(output, /a file exists here/)
@@ -268,7 +271,7 @@ describe('the symlink case, end to end', () => {
     fs.mkdirSync(path.dirname(claudeMd), { recursive: true })
     fs.symlinkSync(source, claudeMd)
 
-    const out = run(['-g', '-a', 'claude-code', '-y'], { home })
+    const out = run(['-g', '-a', 'claude-code', '-y'], { home, expectFail: true })
     assert.match(out, /REFUSED|SKIPPED/, 'the run must report the refusal')
     assert.equal(
       fs.readFileSync(source, 'utf8'), original,
@@ -365,7 +368,7 @@ describe('uninstall', () => {
     fs.writeFileSync(path.join(foreignSkill, 'notes.md'), 'untouched')
     fs.symlinkSync(foreign, canonical)
 
-    run(['uninstall', '-g'], { home })
+    run(['uninstall', '-g'], { home, expectFail: true })
 
     assert.equal(fs.readFileSync(path.join(foreignSkill, 'SKILL.md'), 'utf8'), 'foreign skill')
     assert.equal(fs.readFileSync(path.join(foreignSkill, 'notes.md'), 'utf8'), 'untouched')
@@ -377,13 +380,19 @@ describe('uninstall', () => {
     const agent = path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')
     fs.appendFileSync(agent, '\n# user note\n')
 
-    const update = run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
-    assert.match(update, /REFUSED/)
+    const update = runResult(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    assert.notEqual(update.status, 0)
+    assert.match(`${update.stdout}${update.stderr}`, /REFUSED/)
     assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
 
-    run(['uninstall', '-p'], { home, cwd: project })
+    const uninstall = runResult(['uninstall', '-p'], { home, cwd: project })
+    assert.notEqual(uninstall.status, 0)
     assert.ok(fs.existsSync(agent), 'a modified generated agent must survive uninstall')
     assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
+    const receipt = JSON.parse(fs.readFileSync(path.join(project, '.agent-conventions.json'), 'utf8'))
+    assert.ok(receipt.agents.some((entry) => (
+      entry.provider === 'codex' && entry.name === 'conventions-code-reviewer'
+    )))
   })
 
   test('refuses a foreign agent collision and never claims it in the receipt', () => {
@@ -392,7 +401,9 @@ describe('uninstall', () => {
     fs.mkdirSync(path.dirname(agent), { recursive: true })
     fs.writeFileSync(agent, 'foreign')
 
-    const output = run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    const result = runResult(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    const output = `${result.stdout}${result.stderr}`
+    assert.notEqual(result.status, 0)
     assert.match(output, /REFUSED/)
     assert.equal(fs.readFileSync(agent, 'utf8'), 'foreign')
 
@@ -448,6 +459,22 @@ describe('argument handling', () => {
     const { home } = sandbox('bad-component')
     const out = run(['-g', '-c', 'widgets', '-y'], { home, expectFail: true })
     assert.match(out, /unknown component/)
+  })
+
+  test('rejects missing option values before writing', () => {
+    const { home, project } = sandbox('missing-option-value')
+    const result = runResult(['-p', '--agent'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(`${result.stdout}${result.stderr}`, /requires a value/)
+    assert.ok(!fs.existsSync(path.join(project, '.agents')))
+  })
+
+  test('rejects unexpected positional arguments before writing', () => {
+    const { home, project } = sandbox('unexpected-positional')
+    const result = runResult(['not-a-command', '-p'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(`${result.stdout}${result.stderr}`, /unexpected argument/)
+    assert.ok(!fs.existsSync(path.join(project, '.agents')))
   })
 
   test('--help exits cleanly', () => {

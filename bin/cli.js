@@ -232,6 +232,7 @@ async function runInstall(opts) {
   if (plan.skills) {
     const written = []
     const retainedStalePaths = { dirs: [], links: [] }
+    const retainedProviderLinks = []
     let canonicalPrepared = false
     let canonicalReady = false
     try {
@@ -280,6 +281,10 @@ async function runInstall(opts) {
         }
       } catch (err) {
         incomplete = true
+        retainedProviderLinks.push(
+          ...(plan.previousReceipt?.skills?.links ?? [])
+            .filter((file) => path.dirname(file) === link.dir),
+        )
         console.error(`SKIPPED            ${link.dir}\n                   ${err.message}`)
       }
     }
@@ -287,7 +292,7 @@ async function runInstall(opts) {
       ? {
           canonical: plan.skills.canonical,
           dirs: [...written, ...retainedStalePaths.dirs],
-          links: [...links, ...retainedStalePaths.links],
+          links: [...new Set([...links, ...retainedStalePaths.links, ...retainedProviderLinks])],
         }
       : (plan.previousReceipt?.skills ?? null)
     receipt.mode = mode

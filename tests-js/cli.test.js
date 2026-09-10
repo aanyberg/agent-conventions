@@ -276,6 +276,25 @@ describe('global scope', () => {
     const retried = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
     assert.deepEqual(retried.skills.links, [])
   })
+
+  test('retains selected skill links when their managed root becomes a symlink', () => {
+    const { home } = sandbox('retain-selected-skill-links')
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    const foreign = path.join(home, 'foreign-skills')
+    fs.renameSync(claudeSkills, foreign)
+    fs.symlinkSync(foreign, claudeSkills)
+
+    const failed = runResult(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+    assert.notEqual(failed.status, 0)
+    const retained = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(retained.skills.links.length > 0, 'failed selected links must remain retryable')
+
+    const uninstall = runResult(['uninstall', '-g'], { home })
+    assert.notEqual(uninstall.status, 0)
+    assert.ok(fs.existsSync(path.join(home, '.agent-conventions.json')))
+  })
 })
 
 describe('the symlink case, end to end', () => {

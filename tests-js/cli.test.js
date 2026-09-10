@@ -26,9 +26,13 @@ after(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 /** Run the CLI with an isolated HOME and cwd. Never touches the real machine. */
 function run(args, { home, cwd, expectFail = false } = {}) {
   const result = runResult(args, { home, cwd })
-  if (result.status === 0) return result.stdout
+  if (result.status === 0 && !expectFail) return result.stdout
   const output = `${result.stdout}${result.stderr}`
-  if (expectFail) return output
+  if (expectFail) {
+    assert.notEqual(result.status, 0, `expected CLI failure: ${output}`)
+    assert.notEqual(result.stderr, '', 'CLI failures must explain themselves on stderr')
+    return output
+  }
   throw new Error(`CLI failed: ${output}`)
 }
 
@@ -586,5 +590,33 @@ describe('uninstall does not take content the installer did not add', () => {
 
     run(['uninstall', '-g'], { home })
     assert.ok(!fs.existsSync(path.join(home, '.agent-conventions.json')))
+  })
+
+  test('retains only entries that could not be removed after an I/O failure', (t) => {
+    const { home, project } = sandbox('uninstall-io-failure')
+    run(['-p', '-a', 'codex', '-y'], { home, cwd: project })
+
+    const agent = path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')
+    const parent = path.dirname(agent)
+    const originalMode = fs.statSync(parent).mode
+    t.after(() => fs.chmodSync(parent, originalMode))
+    fs.chmodSync(parent, 0o500)
+
+    const failed = runResult(['uninstall', '-p'], { home, cwd: project })
+    assert.notEqual(failed.status, 0)
+    assert.match(failed.stderr, /Removal incomplete\. Receipt retained:/)
+
+    const receiptPath = path.join(project, '.agent-conventions.json')
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    assert.equal(receipt.skills, null, 'successfully removed skill paths must not remain owned')
+    assert.ok(receipt.agents.length > 0, 'unremovable agents must remain owned')
+    assert.ok(
+      receipt.agents.every((entry) => entry.file.includes('/.codex/agents/')),
+      'the receipt must retain only entries below the unwritable directory',
+    )
+
+    fs.chmodSync(parent, originalMode)
+    run(['uninstall', '-p'], { home, cwd: project })
+    assert.ok(!fs.existsSync(receiptPath), 'a retry must complete after permissions are restored')
   })
 })

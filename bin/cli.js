@@ -320,13 +320,19 @@ async function runInstall(opts) {
     .filter((entry) => !selectedAgentProviders.has(entry.provider))
 
   for (const item of plan.staleAgents) {
-    const result = removeManagedFile(item)
-    if (result.removed) {
-      console.log(`removed stale      ${item.file}`)
-    } else if (result.reason !== 'already absent') {
+    try {
+      const result = removeManagedFile(item)
+      if (result.removed) {
+        console.log(`removed stale      ${item.file}`)
+      } else if (result.reason !== 'already absent') {
+        incomplete = true
+        receipt.agents.push(item)
+        console.error(`kept stale         ${item.file}: ${result.reason}`)
+      }
+    } catch (err) {
       incomplete = true
       receipt.agents.push(item)
-      console.error(`kept stale         ${item.file}: ${result.reason}`)
+      console.error(`kept stale         ${item.file}: ${err.message}`)
     }
   }
 
@@ -399,31 +405,40 @@ async function runUninstall(opts) {
   let incomplete = false
 
   // Only ever remove what the receipt records. Never infer.
-  for (const file of receipt.skills?.links ?? []) {
-    const result = removeSkillPath(file)
-    if (result.removed) console.log(`removed  ${file}`)
-    else {
+  const removeSkill = (file, kind) => {
+    try {
+      const result = removeSkillPath(file)
+      if (result.removed) {
+        console.log(`removed  ${file}`)
+        return
+      }
       incomplete = true
-      remaining.skills.links.push(file)
+      remaining.skills[kind].push(file)
       console.error(`kept     ${file}: ${result.reason}`)
+    } catch (err) {
+      incomplete = true
+      remaining.skills[kind].push(file)
+      console.error(`kept     ${file}: ${err.message}`)
     }
   }
+  for (const file of receipt.skills?.links ?? []) removeSkill(file, 'links')
   for (const file of receipt.skills?.dirs ?? []) {
-    const result = removeSkillPath(file)
-    if (result.removed) console.log(`removed  ${file}`)
-    else {
-      incomplete = true
-      remaining.skills.dirs.push(file)
-      console.error(`kept     ${file}: ${result.reason}`)
-    }
+    removeSkill(file, 'dirs')
   }
   for (const entry of receipt.agents ?? []) {
-    const result = removeManagedFile(entry)
-    if (result.removed || result.reason === 'already absent') console.log(`removed  ${entry.file}`)
-    else {
+    try {
+      const result = removeManagedFile(entry)
+      if (result.removed || result.reason === 'already absent') {
+        console.log(`removed  ${entry.file}`)
+        continue
+      }
       incomplete = true
       remaining.agents.push(entry)
       console.error(`kept     ${entry.file}: ${result.reason}`)
+    } catch (err) {
+      incomplete = true
+      remaining.agents.push(entry)
+      console.error(`kept     ${entry.file}: ${err.message}`)
     }
   }
   for (const item of receipt.instructions ?? []) {

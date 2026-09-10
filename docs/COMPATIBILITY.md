@@ -7,9 +7,11 @@ publishes from Node.js 20.
 ## Provider-Native Agents
 
 The installer emits provider-native agent files. Validation parses every
-rendered YAML or TOML file for every canonical role and asserts the supported
-provider contract. These are deterministic renderer-contract checks, not a
-claim that each provider offers a schema validator.
+rendered YAML or TOML file for every canonical role and checks it against the
+versioned positive and negative fixtures in
+`tests-js/fixtures/agent-contracts.js`. These are deterministic
+renderer-contract checks, not a claim that each provider offers a schema
+validator.
 
 | Provider | Generated format | Official offline validator | Repository contract |
 | --- | --- | --- | --- |
@@ -24,9 +26,12 @@ claim that each provider offers a schema validator.
 
 1. Confirm the provider's current agent-file documentation or schema.
 2. Update the relevant renderer in `src/agents.js`.
-3. Extend `tests-js/agents.test.js` with a positive assertion and a negative
-   fixture for the changed field or value.
-4. Update this table if official validation availability changes.
+3. Update `tests-js/fixtures/agent-contracts.js` with the provider's
+   documented fields and valid values, plus an invalid fixture for the changed
+   field or value.
+4. Extend `tests-js/agents.test.js` if the field needs a new type or
+   cross-field assertion.
+5. Update this table if official validation availability changes.
 
 Provider CLIs are intentionally not run in CI: their agent validation commands
 are unavailable, unsupported for these file types, network-dependent, or

@@ -18,7 +18,8 @@ import { buildPlan, renderDisclosure } from '../src/plan.js'
 import { SELECTABLE_AGENTS, parseAgentSelection } from '../src/targets.js'
 import {
   applyInstructionWrite, applyManagedFileWrite, installSkill, linkSkill,
-  readReceipt, removeBlock, removeManagedFile, writeReceipt,
+  prepareSkillLinkDirectory, readReceipt, removeBlock, removeManagedFile,
+  removeSkillPath, writeReceipt,
 } from '../src/write.js'
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -38,9 +39,9 @@ Options
   -c, --components <list> skills,agents,instructions  (default: all at global
                           scope, skills and agents at project scope)
       --copy              copy instead of symlinking
-      --replace-symlinks  replace an existing instruction symlink with a real
-                          file. Without this, a symlink is refused rather than
-                          written through.
+      --replace-symlinks  replace an existing instruction or Claude skills
+                          symlink with a real path. Without this, a symlink is
+                          refused rather than written through.
       --dry-run           print the plan and exit without writing
   -y, --yes               skip the confirmation prompt (the plan is still printed)
   -h, --help
@@ -214,28 +215,59 @@ async function runInstall(opts) {
   }
 
   if (plan.skills) {
-    for (const stale of plan.staleSkillPaths) {
-      fs.rmSync(stale, { recursive: true, force: true })
-      console.log(`removed stale      ${stale}`)
-    }
     const written = []
-    for (const skill of plan.skills.sources) {
-      const dest = path.join(plan.skills.canonical, skill.name)
-      installSkill(skill.dir, dest)
-      written.push(dest)
+    let canonicalPrepared = false
+    let canonicalReady = false
+    try {
+      const prepared = prepareSkillLinkDirectory(plan.skills.canonicalPlan, {
+        replaceSymlinks: opts.replaceSymlinks,
+      })
+      canonicalPrepared = true
+      if (prepared.applied === 'replaced-symlink') {
+        console.log(`replaced-symlink   ${plan.skills.canonical}`)
+      }
+      for (const stale of plan.staleSkillPaths) {
+        const result = removeSkillPath(stale)
+        if (result.removed) console.log(`removed stale      ${stale}`)
+        else console.error(`kept stale         ${stale}: ${result.reason}`)
+      }
+      for (const skill of plan.skills.sources) {
+        const dest = path.join(plan.skills.canonical, skill.name)
+        installSkill(skill.dir, dest)
+        written.push(dest)
+      }
+      canonicalReady = true
+    } catch (err) {
+      console.error(
+        `SKIPPED skills     ${plan.skills.canonical}\n                   ${err.message}`,
+      )
     }
     const links = []
     let mode = plan.mode
-    for (const link of plan.skills.links) {
-      for (const name of plan.skills.names) {
-        const linkPath = path.join(link.dir, name)
-        mode = linkSkill(path.join(plan.skills.canonical, name), linkPath, { copy: opts.copy })
-        links.push(linkPath)
+    for (const link of canonicalReady ? plan.skills.links : []) {
+      try {
+        const prepared = prepareSkillLinkDirectory(link, {
+          replaceSymlinks: opts.replaceSymlinks,
+        })
+        if (prepared.applied === 'replaced-symlink') {
+          console.log(`replaced-symlink   ${link.dir}`)
+        }
+        for (const name of plan.skills.names) {
+          const linkPath = path.join(link.dir, name)
+          mode = linkSkill(path.join(plan.skills.canonical, name), linkPath, { copy: opts.copy })
+          links.push(linkPath)
+        }
+      } catch (err) {
+        console.error(`SKIPPED            ${link.dir}\n                   ${err.message}`)
       }
     }
-    receipt.skills = { canonical: plan.skills.canonical, dirs: written, links }
+    receipt.skills = canonicalPrepared
+      ? { canonical: plan.skills.canonical, dirs: written, links }
+      : (plan.previousReceipt?.skills ?? null)
     receipt.mode = mode
-    console.log(`Installed ${plan.skills.names.length} skills to ${plan.skills.canonical}`)
+    if (written.length) {
+      console.log(`Installed ${written.length} skills to ${plan.skills.canonical}`)
+    }
     if (links.length) console.log(`Linked ${links.length} into ${plan.skills.links.map((l) => l.dir).join(', ')} (${mode})`)
   }
 
@@ -308,8 +340,10 @@ async function runUninstall(opts) {
   }
 
   // Only ever remove what the receipt records. Never infer.
-  for (const link of receipt.skills?.links ?? []) fs.rmSync(link, { recursive: true, force: true })
-  for (const dir of receipt.skills?.dirs ?? []) fs.rmSync(dir, { recursive: true, force: true })
+  for (const file of [...(receipt.skills?.links ?? []), ...(receipt.skills?.dirs ?? [])]) {
+    const result = removeSkillPath(file)
+    if (!result.removed) console.error(`kept     ${file}: ${result.reason}`)
+  }
   for (const entry of receipt.agents ?? []) {
     const result = removeManagedFile(entry)
     if (result.removed) console.log(`removed  ${entry.file}`)

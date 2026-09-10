@@ -38,7 +38,7 @@ It writes a receipt, so `uninstall` removes exactly what was installed and nothi
 npx github:aanyberg/agent-conventions uninstall -g
 ```
 
-**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path is already a **symlink** — which it will be if you followed the older setup below — the installer refuses it rather than writing through the link into your clone. `--replace-symlinks` converts it, leaving the file it pointed at untouched.
+**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path or `.claude/skills/` is already a **symlink**, the installer refuses it rather than writing through the link. Other selected providers still install, and the receipt records only successful writes. `--replace-symlinks` converts the link itself to a real path, leaving its target untouched.
 
 Your project's own `AGENTS.md` is never written. That file is yours.
 
@@ -67,9 +67,11 @@ Agent flags: `claude-code`, `codex`, `github-copilot`, `opencode`, `cursor`, `ge
 | Path | Read by |
 | --- | --- |
 | `.agents/skills/` (or `~/.agents/skills/`) | Codex, GitHub Copilot, OpenCode, Cursor, Gemini CLI, Cline, Zed, Amp and others — this is the cross-vendor convention |
-| `.claude/skills/` (or `~/.claude/skills/`) | Claude Code, the one holdout — symlinked to the above, not a second copy |
+| `.claude/skills/` (or `~/.claude/skills/`) | Claude Code, the one holdout — contains per-skill links into the above, not a second copy |
 
-Because Claude Code is a symlink into the same files, there is no duplicate to drift. At project scope, commit `.agents/skills/` and gitignore `.claude/skills/`.
+Because each Claude Code entry uses a full-path symlink into the same files,
+there is no duplicate to drift. At project scope, commit `.agents/skills/` and
+gitignore `.claude/skills/`; regenerate the links after moving the project.
 
 ### Agents — every target provider
 
@@ -191,7 +193,7 @@ If the receipt is gone, or you would rather see exactly what is there, these are
 
 ```bash
 ~/.agents/skills/          # the 17 skills — the real files
-~/.claude/skills/          # links into the above
+~/.claude/skills/          # one link per skill into the above
 ~/.claude/agents/          # generated Claude agents
 ~/.codex/agents/           # generated Codex TOML agents
 ~/.copilot/agents/         # generated Copilot agents

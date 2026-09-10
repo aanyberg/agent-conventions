@@ -62,6 +62,8 @@ describe('project scope', () => {
     // Claude's entries are links into the canonical copy, not duplicates.
     const entry = path.join(claude, 'git-conventions')
     assert.ok(fs.lstatSync(entry).isSymbolicLink(), 'Claude entries must be links, not copies')
+    assert.ok(path.isAbsolute(fs.readlinkSync(entry)), 'Claude links must use full paths')
+    assert.equal(fs.realpathSync(entry), fs.realpathSync(path.join(canonical, 'git-conventions')))
     assert.ok(fs.existsSync(path.join(entry, 'SKILL.md')), 'the link must resolve')
 
     assert.ok(fs.existsSync(path.join(project, '.claude', 'agents', 'conventions-code-reviewer.md')))
@@ -103,6 +105,99 @@ describe('global scope', () => {
     for (const rel of [['.copilot', 'copilot-instructions.md'], ['.codex', 'AGENTS.md'], ['.gemini', 'GEMINI.md']]) {
       assert.ok(fs.existsSync(path.join(home, ...rel)), `${rel.join('/')} must be written`)
     }
+  })
+
+  test('skips a dangling Claude skills symlink while installing other components', () => {
+    const { home } = sandbox('global-dangling-skills')
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    const missing = path.join(home, 'missing-skills')
+    fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
+    fs.symlinkSync(missing, claudeSkills)
+
+    const output = run(['-g', '-a', 'all', '-y'], { home })
+
+    assert.match(output, /REFUSED without --replace-symlinks/)
+    assert.ok(fs.lstatSync(claudeSkills).isSymbolicLink())
+    assert.ok(!fs.existsSync(missing), 'the dangling target must remain absent')
+    assert.ok(fs.existsSync(path.join(home, '.agents', 'skills', 'git-conventions', 'SKILL.md')))
+    assert.ok(fs.existsSync(path.join(home, '.codex', 'agents', 'conventions-code-reviewer.toml')))
+    assert.ok(fs.existsSync(path.join(home, '.copilot', 'copilot-instructions.md')))
+
+    const receipt = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.equal(receipt.skills.links.length, 0, 'skipped links must not be claimed')
+    assert.ok(receipt.skills.dirs.length >= 17, 'canonical skills must remain uninstallable')
+  })
+
+  test('skips a dangling canonical skills symlink while installing other components', () => {
+    const { home } = sandbox('global-dangling-canonical')
+    const canonical = path.join(home, '.agents', 'skills')
+    const missing = path.join(home, 'missing-canonical-skills')
+    fs.mkdirSync(path.dirname(canonical), { recursive: true })
+    fs.symlinkSync(missing, canonical)
+
+    const output = run(['-g', '-a', 'all', '-y'], { home })
+
+    assert.match(output, /REFUSED without --replace-symlinks/)
+    assert.ok(fs.lstatSync(canonical).isSymbolicLink())
+    assert.ok(!fs.existsSync(missing), 'the dangling target must remain absent')
+    assert.ok(fs.existsSync(path.join(home, '.codex', 'agents', 'conventions-code-reviewer.toml')))
+    assert.ok(fs.existsSync(path.join(home, '.copilot', 'copilot-instructions.md')))
+    const receipt = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.equal(receipt.skills, null, 'a skipped fresh skills install must claim nothing')
+  })
+
+  test('--replace-symlinks converts the canonical skills root without touching its target', () => {
+    const { home } = sandbox('global-replace-canonical')
+    const foreign = path.join(home, 'foreign-canonical')
+    const foreignSkill = path.join(foreign, 'git-conventions')
+    fs.mkdirSync(foreignSkill, { recursive: true })
+    fs.writeFileSync(path.join(foreignSkill, 'SKILL.md'), 'foreign skill')
+    fs.writeFileSync(path.join(foreignSkill, 'notes.md'), 'untouched')
+    const canonical = path.join(home, '.agents', 'skills')
+    fs.mkdirSync(path.dirname(canonical), { recursive: true })
+    fs.symlinkSync(foreign, canonical)
+
+    run(['-g', '-a', 'codex', '-c', 'skills', '--replace-symlinks', '-y'], { home })
+
+    assert.equal(fs.lstatSync(canonical).isSymbolicLink(), false)
+    assert.ok(fs.existsSync(path.join(canonical, 'git-conventions', 'SKILL.md')))
+    assert.equal(fs.readFileSync(path.join(foreignSkill, 'SKILL.md'), 'utf8'), 'foreign skill')
+    assert.equal(fs.readFileSync(path.join(foreignSkill, 'notes.md'), 'utf8'), 'untouched')
+  })
+
+  test('--replace-symlinks converts the Claude skills root without touching its target', () => {
+    const { home } = sandbox('global-replace-skills')
+    const foreign = path.join(home, 'foreign-skills')
+    fs.mkdirSync(foreign)
+    fs.writeFileSync(path.join(foreign, 'keep.txt'), 'untouched')
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
+    fs.symlinkSync(foreign, claudeSkills)
+
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '--replace-symlinks', '-y'], { home })
+
+    assert.equal(fs.lstatSync(claudeSkills).isSymbolicLink(), false)
+    assert.ok(fs.lstatSync(path.join(claudeSkills, 'git-conventions')).isSymbolicLink())
+    assert.equal(fs.readFileSync(path.join(foreign, 'keep.txt'), 'utf8'), 'untouched')
+    assert.ok(!fs.existsSync(path.join(foreign, 'git-conventions')))
+  })
+
+  test('skips a Claude skills file collision while installing other components', () => {
+    const { home } = sandbox('global-skills-file')
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
+    fs.writeFileSync(claudeSkills, 'foreign')
+
+    const output = run(['-g', '-a', 'all', '-y'], { home })
+
+    assert.match(output, /REFUSED path conflicts/)
+    assert.match(output, /a file exists here/)
+    assert.doesNotMatch(output, /REFUSED without --replace-symlinks/)
+    assert.equal(fs.readFileSync(claudeSkills, 'utf8'), 'foreign')
+    assert.ok(fs.existsSync(path.join(home, '.agents', 'skills', 'git-conventions', 'SKILL.md')))
+    assert.ok(fs.existsSync(path.join(home, '.codex', 'agents', 'conventions-code-reviewer.toml')))
+    const receipt = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.equal(receipt.skills.links.length, 0)
   })
 
   test('preserves existing instruction content outside the markers', () => {
@@ -255,6 +350,25 @@ describe('uninstall', () => {
 
     run(['uninstall', '-p'], { home, cwd: project })
     assert.ok(fs.existsSync(path.join(foreign, 'SKILL.md')), 'a foreign skill must survive uninstall')
+  })
+
+  test('uninstall refuses to remove skills through a replaced canonical-root symlink', () => {
+    const { home } = sandbox('uninstall-replaced-canonical')
+    run(['-g', '-a', 'all', '-y'], { home })
+
+    const canonical = path.join(home, '.agents', 'skills')
+    fs.rmSync(canonical, { recursive: true })
+    const foreign = path.join(home, 'foreign-after-install')
+    const foreignSkill = path.join(foreign, 'git-conventions')
+    fs.mkdirSync(foreignSkill, { recursive: true })
+    fs.writeFileSync(path.join(foreignSkill, 'SKILL.md'), 'foreign skill')
+    fs.writeFileSync(path.join(foreignSkill, 'notes.md'), 'untouched')
+    fs.symlinkSync(foreign, canonical)
+
+    run(['uninstall', '-g'], { home })
+
+    assert.equal(fs.readFileSync(path.join(foreignSkill, 'SKILL.md'), 'utf8'), 'foreign skill')
+    assert.equal(fs.readFileSync(path.join(foreignSkill, 'notes.md'), 'utf8'), 'untouched')
   })
 
   test('preserves a generated agent modified after installation', () => {

@@ -208,30 +208,93 @@ export function planManagedFileRemoval(entry) {
   return { ...entry, action: 'remove', detail: 'removes stale managed file' }
 }
 
+/** Plan a provider skill root without following an unowned symlink. */
+export function planSkillLinkDirectory(dir) {
+  const at = classify(dir)
+  if (at.kind === 'absent') return { dir, action: 'create', detail: 'creates directory' }
+  if (at.kind === 'directory') return { dir, action: 'use', detail: 'uses existing directory' }
+  if (at.kind === 'symlink') {
+    return {
+      dir,
+      action: 'refuse-symlink',
+      detail: `symlink → ${at.resolved}`,
+      resolved: at.resolved,
+    }
+  }
+  return { dir, action: 'refuse', detail: 'a file exists here' }
+}
+
+/** Prepare a planned provider skill root, replacing only an explicitly approved symlink. */
+export function prepareSkillLinkDirectory(plan, { replaceSymlinks = false } = {}) {
+  if (plan.action === 'refuse') throw new Error(`${plan.dir}: ${plan.detail}`)
+  if (plan.action === 'refuse-symlink' && !replaceSymlinks) {
+    throw new Error(
+      `${plan.dir} is a symlink → ${plan.resolved}. Writing below it would modify ` +
+        `that directory. Re-run with --replace-symlinks to replace the link itself.`,
+    )
+  }
+  if (plan.action === 'refuse-symlink') fs.unlinkSync(plan.dir)
+  fs.mkdirSync(plan.dir, { recursive: true })
+  return {
+    ...plan,
+    applied: plan.action === 'refuse-symlink' ? 'replaced-symlink' : plan.action,
+  }
+}
+
+/** Remove a receipt-owned skill path only through a real parent directory. */
+export function removeSkillPath(file) {
+  const parent = path.dirname(file)
+  const at = classify(parent)
+  if (at.kind === 'symlink') {
+    return {
+      file,
+      removed: false,
+      reason: `parent is a symlink → ${at.resolved}; refusing to remove through it`,
+    }
+  }
+  if (at.kind !== 'directory') {
+    return { file, removed: false, reason: `parent is ${at.kind}` }
+  }
+  fs.rmSync(file, { recursive: true, force: true })
+  return { file, removed: true }
+}
+
 /** Copy a skill directory, replacing any previous copy of the same skill. */
 export function installSkill(sourceDir, destDir) {
+  const parent = path.dirname(destDir)
+  const at = classify(parent)
+  if (at.kind === 'symlink') {
+    throw new Error(`${parent} is a symlink → ${at.resolved}; refusing to write through it`)
+  }
+  if (at.kind === 'file') throw new Error(`${parent} is a file; expected a directory`)
   fs.rmSync(destDir, { recursive: true, force: true })
-  fs.mkdirSync(path.dirname(destDir), { recursive: true })
+  fs.mkdirSync(parent, { recursive: true })
   fs.cpSync(sourceDir, destDir, { recursive: true })
 }
 
 /**
  * Link a skill into an agent-specific directory.
  *
- * Relative targets, so a committed project tree still resolves after a clone to
- * a different path. Falls back to a copy where symlinks are unavailable, which
- * is Windows without Developer Mode more often than anything else.
+ * Absolute targets make the installed destination explicit when inspecting it
+ * with filesystem tools. Falls back to a copy where symlinks are unavailable,
+ * which is Windows without Developer Mode more often than anything else.
  */
 export function linkSkill(canonicalDir, linkPath, { copy = false } = {}) {
+  const parent = path.dirname(linkPath)
+  const at = classify(parent)
+  if (at.kind === 'symlink') {
+    throw new Error(`${parent} is a symlink → ${at.resolved}; refusing to write through it`)
+  }
+  if (at.kind === 'file') throw new Error(`${parent} is a file; expected a directory`)
   fs.rmSync(linkPath, { recursive: true, force: true })
-  fs.mkdirSync(path.dirname(linkPath), { recursive: true })
+  fs.mkdirSync(parent, { recursive: true })
   if (copy) {
     fs.cpSync(canonicalDir, linkPath, { recursive: true })
     return 'copy'
   }
-  const rel = path.relative(path.dirname(linkPath), canonicalDir)
+  const target = path.resolve(canonicalDir)
   try {
-    fs.symlinkSync(rel, linkPath, 'dir')
+    fs.symlinkSync(target, linkPath, 'dir')
     return 'symlink'
   } catch (err) {
     if (err.code !== 'EPERM' && err.code !== 'EACCES') throw err

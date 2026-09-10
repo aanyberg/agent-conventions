@@ -53,6 +53,7 @@ function parseArgs(argv) {
     copy: false, replaceSymlinks: false, dryRun: false, yes: false, help: false,
   }
   const rest = [...argv]
+  let commandSeen = false
   while (rest.length) {
     const arg = rest.shift()
     const optionValue = () => {
@@ -61,8 +62,16 @@ function parseArgs(argv) {
       return value
     }
     switch (arg) {
-      case 'install': opts.command = 'install'; break
-      case 'uninstall': case 'remove': opts.command = 'uninstall'; break
+      case 'install':
+        if (commandSeen) throw new Error(`unexpected argument: ${arg}`)
+        commandSeen = true
+        opts.command = 'install'
+        break
+      case 'uninstall': case 'remove':
+        if (commandSeen) throw new Error(`unexpected argument: ${arg}`)
+        commandSeen = true
+        opts.command = 'uninstall'
+        break
       case '-g': case '--global': opts.scope = 'global'; break
       case '-p': case '--project': opts.scope = 'project'; break
       case '-a': case '--agent': opts.agents = optionValue(); break
@@ -222,6 +231,7 @@ async function runInstall(opts) {
   let incomplete = false
   if (plan.skills) {
     const written = []
+    const retainedStalePaths = { dirs: [], links: [] }
     let canonicalPrepared = false
     let canonicalReady = false
     try {
@@ -233,11 +243,12 @@ async function runInstall(opts) {
         console.log(`replaced-symlink   ${plan.skills.canonical}`)
       }
       for (const stale of plan.staleSkillPaths) {
-        const result = removeSkillPath(stale)
-        if (result.removed) console.log(`removed stale      ${stale}`)
+        const result = removeSkillPath(stale.file)
+        if (result.removed) console.log(`removed stale      ${stale.file}`)
         else {
           incomplete = true
-          console.error(`kept stale         ${stale}: ${result.reason}`)
+          retainedStalePaths[stale.kind].push(stale.file)
+          console.error(`kept stale         ${stale.file}: ${result.reason}`)
         }
       }
       for (const skill of plan.skills.sources) {
@@ -273,7 +284,11 @@ async function runInstall(opts) {
       }
     }
     receipt.skills = canonicalPrepared
-      ? { canonical: plan.skills.canonical, dirs: written, links }
+      ? {
+          canonical: plan.skills.canonical,
+          dirs: [...written, ...retainedStalePaths.dirs],
+          links: [...links, ...retainedStalePaths.links],
+        }
       : (plan.previousReceipt?.skills ?? null)
     receipt.mode = mode
     if (written.length) {
@@ -386,7 +401,7 @@ async function runUninstall(opts) {
   }
   for (const entry of receipt.agents ?? []) {
     const result = removeManagedFile(entry)
-    if (result.removed) console.log(`removed  ${entry.file}`)
+    if (result.removed || result.reason === 'already absent') console.log(`removed  ${entry.file}`)
     else {
       incomplete = true
       remaining.agents.push(entry)
@@ -409,6 +424,10 @@ async function runUninstall(opts) {
         console.log(`stripped ${item.file} (kept your content)`)
       }
     } catch (err) {
+      if (err.code === 'ENOENT') {
+        console.log(`removed  ${item.file}`)
+        continue
+      }
       incomplete = true
       remaining.instructions.push(item)
       console.error(`skipped  ${item.file}: ${err.message}`)

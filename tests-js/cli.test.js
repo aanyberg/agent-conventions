@@ -255,6 +255,27 @@ describe('global scope', () => {
     run(['-p', '-a', 'codex', '-c', 'skills', '-y'], { home, cwd: project })
     assert.ok(!fs.existsSync(stale), 'an obsolete package-owned skill path must be removed')
   })
+
+  test('retains stale skill links after a failed cleanup and removes them on retry', () => {
+    const { home } = sandbox('retry-stale-skill-links')
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    const foreign = path.join(home, 'foreign-skills')
+    fs.renameSync(claudeSkills, foreign)
+    fs.symlinkSync(foreign, claudeSkills)
+
+    const failed = runResult(['-g', '-a', 'codex', '-c', 'skills', '-y'], { home })
+    assert.notEqual(failed.status, 0)
+    const retained = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(retained.skills.links.length > 0, 'failed stale links must remain retryable')
+
+    fs.unlinkSync(claudeSkills)
+    fs.renameSync(foreign, claudeSkills)
+    run(['-g', '-a', 'codex', '-c', 'skills', '-y'], { home })
+    const retried = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.deepEqual(retried.skills.links, [])
+  })
 })
 
 describe('the symlink case, end to end', () => {
@@ -477,6 +498,14 @@ describe('argument handling', () => {
     assert.ok(!fs.existsSync(path.join(project, '.agents')))
   })
 
+  test('rejects a second command token before writing', () => {
+    const { home, project } = sandbox('duplicate-command')
+    const result = runResult(['uninstall', 'install', '-p'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(`${result.stdout}${result.stderr}`, /unexpected argument/)
+    assert.ok(!fs.existsSync(path.join(project, '.agents')))
+  })
+
   test('--help exits cleanly', () => {
     const { home } = sandbox('help')
     assert.match(run(['--help'], { home }), /agent-conventions/)
@@ -508,5 +537,17 @@ describe('uninstall does not take content the installer did not add', () => {
     assert.ok(fs.existsSync(codexAgents))
     run(['uninstall', '-g'], { home })
     assert.ok(!fs.existsSync(codexAgents), 'a file containing only our block should not be left empty')
+  })
+
+  test('completes uninstall when receipt-owned paths are already absent', () => {
+    const { home } = sandbox('uninstall-already-absent')
+    run(['-g', '-a', 'codex', '-y'], { home })
+
+    fs.rmSync(path.join(home, '.agents', 'skills'), { recursive: true })
+    fs.rmSync(path.join(home, '.codex', 'agents', 'conventions-code-reviewer.toml'))
+    fs.rmSync(path.join(home, '.codex', 'AGENTS.md'))
+
+    run(['uninstall', '-g'], { home })
+    assert.ok(!fs.existsSync(path.join(home, '.agent-conventions.json')))
   })
 })

@@ -252,6 +252,7 @@ export function removeSkillPath(file) {
       reason: `parent is a symlink → ${at.resolved}; refusing to remove through it`,
     }
   }
+  if (at.kind === 'absent') return { file, removed: true }
   if (at.kind !== 'directory') {
     return { file, removed: false, reason: `parent is ${at.kind}` }
   }

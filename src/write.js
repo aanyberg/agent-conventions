@@ -268,9 +268,26 @@ export function installSkill(sourceDir, destDir) {
     throw new Error(`${parent} is a symlink → ${at.resolved}; refusing to write through it`)
   }
   if (at.kind === 'file') throw new Error(`${parent} is a file; expected a directory`)
-  fs.rmSync(destDir, { recursive: true, force: true })
   fs.mkdirSync(parent, { recursive: true })
-  fs.cpSync(sourceDir, destDir, { recursive: true })
+  const stagingParent = fs.mkdtempSync(path.join(parent, `.${path.basename(destDir)}-`))
+  const staged = path.join(stagingParent, path.basename(destDir))
+  const previous = path.join(stagingParent, 'previous')
+  let movedPrevious = false
+  try {
+    fs.cpSync(sourceDir, staged, { recursive: true })
+    if (classify(destDir).kind !== 'absent') {
+      fs.renameSync(destDir, previous)
+      movedPrevious = true
+    }
+    try {
+      fs.renameSync(staged, destDir)
+    } catch (err) {
+      if (movedPrevious) fs.renameSync(previous, destDir)
+      throw err
+    }
+  } finally {
+    fs.rmSync(stagingParent, { recursive: true, force: true })
+  }
 }
 
 /**

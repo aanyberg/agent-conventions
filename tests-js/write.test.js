@@ -185,6 +185,25 @@ describe('skills', () => {
     assert.ok(!fs.existsSync(path.join(dest, 'STALE.md')), 'stale files must not survive')
   })
 
+  test('installSkill preserves the previous copy when staging fails', (t) => {
+    const dir = scratch('skill-stage-failure')
+    const src = path.join(dir, 'src', 'demo')
+    fs.mkdirSync(src, { recursive: true })
+    fs.writeFileSync(path.join(src, 'SKILL.md'), 'new')
+
+    const dest = path.join(dir, 'dest', 'demo')
+    fs.mkdirSync(dest, { recursive: true })
+    fs.writeFileSync(path.join(dest, 'SKILL.md'), 'old')
+    fs.writeFileSync(path.join(dest, 'user-note.md'), 'keep')
+
+    const copy = fs.cpSync
+    fs.cpSync = () => { throw new Error('copy failed') }
+    t.after(() => { fs.cpSync = copy })
+    assert.throws(() => installSkill(src, dest))
+    assert.equal(fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'), 'old')
+    assert.equal(fs.readFileSync(path.join(dest, 'user-note.md'), 'utf8'), 'keep')
+  })
+
   describe('generated managed files', () => {
     test('refuses a foreign file and preserves it', () => {
       const dir = scratch('managed-foreign')

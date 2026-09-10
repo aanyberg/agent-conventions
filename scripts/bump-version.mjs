@@ -4,9 +4,8 @@
  *
  * Six files state a version, and a release that updates five ships an
  * inconsistent set that no single tool can detect — a Gemini user and a Codex
- * user would see different versions of the same release. `tests/
- * test_install_manifests.py::test_every_manifest_declares_the_same_version`
- * fails on that, and this script is how you avoid tripping it by hand.
+ * user would see different versions of the same release. The manifest tests
+ * fail on that, and this script is how you avoid tripping them by hand.
  *
  * Written in Node rather than shell on purpose: these are JSON documents, and
  * editing JSON with `sed` is precisely the class of fragility the repo's
@@ -97,7 +96,7 @@ function main(argv) {
     console.error(`\n${changed.length} manifest(s) are not at ${version}.`)
     return 1
   }
-  console.log(`\n${changed.length} manifest(s) updated. Commit, then tag v${version}.`)
+  console.log(`\n${changed.length} manifest(s) updated. Commit, then tag ${version}.`)
   return 0
 }
 

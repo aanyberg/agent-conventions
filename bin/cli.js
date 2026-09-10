@@ -233,6 +233,7 @@ async function runInstall(opts) {
     const written = []
     const retainedStalePaths = { dirs: [], links: [] }
     const retainedProviderLinks = []
+    const removedStalePaths = new Set()
     let canonicalPrepared = false
     let canonicalReady = false
     try {
@@ -245,7 +246,10 @@ async function runInstall(opts) {
       }
       for (const stale of plan.staleSkillPaths) {
         const result = removeSkillPath(stale.file)
-        if (result.removed) console.log(`removed stale      ${stale.file}`)
+        if (result.removed) {
+          removedStalePaths.add(stale.file)
+          console.log(`removed stale      ${stale.file}`)
+        }
         else {
           incomplete = true
           retainedStalePaths[stale.kind].push(stale.file)
@@ -288,12 +292,21 @@ async function runInstall(opts) {
         console.error(`SKIPPED            ${link.dir}\n                   ${err.message}`)
       }
     }
-    receipt.skills = canonicalPrepared
+    const retainedPreviousPaths = (kind) => (
+      plan.previousReceipt?.skills?.[kind]?.filter((file) => !removedStalePaths.has(file)) ?? []
+    )
+    receipt.skills = canonicalReady
       ? {
           canonical: plan.skills.canonical,
           dirs: [...written, ...retainedStalePaths.dirs],
           links: [...new Set([...links, ...retainedStalePaths.links, ...retainedProviderLinks])],
         }
+      : canonicalPrepared
+        ? {
+            canonical: plan.skills.canonical,
+            dirs: [...new Set([...retainedPreviousPaths('dirs'), ...written])],
+            links: retainedPreviousPaths('links'),
+          }
       : (plan.previousReceipt?.skills ?? null)
     receipt.mode = mode
     if (written.length) {

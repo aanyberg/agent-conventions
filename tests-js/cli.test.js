@@ -295,6 +295,22 @@ describe('global scope', () => {
     assert.notEqual(uninstall.status, 0)
     assert.ok(fs.existsSync(path.join(home, '.agent-conventions.json')))
   })
+
+  test('retains managed skills when a canonical refresh fails after preparation', (t) => {
+    const { home } = sandbox('retain-failed-canonical-refresh')
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+
+    const canonical = path.join(home, '.agents', 'skills')
+    const originalMode = fs.statSync(canonical).mode
+    t.after(() => fs.chmodSync(canonical, originalMode))
+    fs.chmodSync(canonical, 0o500)
+
+    const failed = runResult(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+    assert.notEqual(failed.status, 0)
+    const retained = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(retained.skills.dirs.length > 0)
+    assert.ok(retained.skills.links.length > 0)
+  })
 })
 
 describe('the symlink case, end to end', () => {

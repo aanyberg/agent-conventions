@@ -125,30 +125,19 @@ A consumer repo can commit the marketplace in `.claude/settings.json` so contrib
 
 ### Global Instructions
 
-`AGENTS.md` is the single source of truth. The filename is the portable part — 30+ tools read a project's `AGENTS.md` directly — but *global* instructions are a different matter: each tool looks in its own config directory, and two of them expect a different filename there. So every tool below needs a link, and what portability buys you is one file to edit rather than three to keep in sync.
+`AGENTS.md` is the single source of truth. Global instructions use
+provider-specific filenames, so install the managed block with the package
+installer rather than creating symlinks:
 
-> **This step is manual for now.** The symlinks below are the current method; they are being replaced by an installer that appends a marked block instead, so an existing file is never clobbered. Until then, note that a symlink means edits to the target write back into this repository.
-
-Symlink `AGENTS.md` to each tool's expected config path:
-
-**Claude Code**
 ```bash
-ln -s /path/to/agent-conventions/AGENTS.md ~/.claude/CLAUDE.md
+npx github:aanyberg/agent-conventions -g -c instructions
 ```
 
-**GitHub Copilot**
-```bash
-mkdir -p ~/.copilot
-ln -s /path/to/agent-conventions/AGENTS.md ~/.copilot/copilot-instructions.md
-```
-
-**OpenAI Codex CLI**
-```bash
-mkdir -p ~/.codex
-ln -s /path/to/agent-conventions/AGENTS.md ~/.codex/AGENTS.md
-```
-
-Replace `/path/to/agent-conventions` with the absolute path to your local clone, e.g. `/home/<username>/projects/agent-conventions`.
+The installer appends a marked block to the selected instruction files and
+preserves content outside that block. It refuses instruction-file symlinks
+unless `--replace-symlinks` is explicitly provided; replacement affects only
+the symlink itself, never its target. Use `uninstall -g` to remove only the
+managed block later.
 
 ## Removing
 

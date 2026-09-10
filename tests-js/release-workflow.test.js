@@ -29,4 +29,8 @@ test('release workflow pins npm to a Node 20-compatible major', () => {
   assert.ok(installNpm, 'publish job must install npm for trusted publishing')
   assert.match(installNpm.run, /^npm install -g npm@11$/)
   assert.doesNotMatch(installNpm.run, /npm@latest/)
+  assert.ok(
+    workflow.jobs.publish.steps.some((step) => step.run === 'npm publish --access public'),
+    'publish job must publish rather than stage the package',
+  )
 })

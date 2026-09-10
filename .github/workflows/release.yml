@@ -85,4 +85,4 @@ jobs:
       # Node 20. Stay on the latest compatible npm 11 release.
       - run: npm install -g npm@11
 
-      - run: npm stage publish --access public
+      - run: npm publish --access public

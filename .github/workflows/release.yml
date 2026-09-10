@@ -6,7 +6,9 @@ name: release
 # so "it was green on the PR" is not something a publish can assume.
 on:
   push:
-    tags: ['v*']
+    # GitHub tag filters are globs, not regular expressions. Match tags that
+    # look numeric here, then enforce complete semver in the verify job.
+    tags: ['[0-9]*.[0-9]*.[0-9]*']
 
 jobs:
   verify:
@@ -24,7 +26,7 @@ jobs:
       # npm would publish a version nobody can find from the git history.
       - name: Tag must match the manifests
         run: |
-          tag="${GITHUB_REF_NAME#v}"
+          tag="$GITHUB_REF_NAME"
           echo "Tag says: $tag"
           node scripts/bump-version.mjs "$tag" --check
 

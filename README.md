@@ -28,7 +28,7 @@ npx github:aanyberg/agent-conventions -g --dry-run
 
 Once the package is on npm the shorter `npx @anyberg/agent-conventions@latest` works identically.
 
-> **Note the spelling.** The npm scope is `@anyberg` (one `a`); the GitHub org and the Claude marketplace are `aanyberg` (two). They are separate namespaces and the handles differ — `github:aanyberg/…` and `conventions@aanyberg` are correct as written. The `github:` form needs nothing published and accepts any ref — `github:aanyberg/agent-conventions#v1.1.0` pins a release.
+> **Note the spelling.** The npm scope is `@anyberg` (one `a`); the GitHub org and the Claude marketplace are `aanyberg` (two). They are separate namespaces and the handles differ — `github:aanyberg/…` and `conventions@aanyberg` are correct as written. The `github:` form needs nothing published and accepts any ref — `github:aanyberg/agent-conventions#1.1.0` pins a release.
 
 Run bare, it asks for scope and agents, prints every path it will touch, and defaults to **no**. `-y` skips the prompt but still prints the plan. Nothing global is written without the paths appearing on screen first.
 
@@ -219,10 +219,10 @@ Six manifests declare a version. Set them together, never by hand:
 ```bash
 node scripts/bump-version.mjs 1.1.0
 git commit -am "chore: release 1.1.0"
-git tag v1.1.0 && git push --tags
+git tag 1.1.0 && git push origin 1.1.0
 ```
 
-The tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs both suites rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a publish cannot assume the PR was green. It also verifies the tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it publish.
+The bare semantic-version tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs the full suite rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a publish cannot assume the PR was green. It also verifies the complete tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it publish.
 
 Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) over OIDC: no `NPM_TOKEN` is stored anywhere, the credential is short-lived and scoped to this one workflow, and npm attaches a provenance attestation automatically.
 

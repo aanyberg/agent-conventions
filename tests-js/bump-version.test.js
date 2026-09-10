@@ -62,6 +62,13 @@ describe('bump', () => {
     assert.deepEqual(readVersions(root), before, 'nothing may be written on a bad input')
   })
 
+  test('rejects a v-prefixed semantic version', () => {
+    const root = fixture('prefixed-semver')
+    const before = readVersions(root)
+    assert.throws(() => bump('v1.2.3', { root }), /not semver/)
+    assert.deepEqual(readVersions(root), before, 'nothing may be written for a prefixed tag')
+  })
+
   test('accepts a prerelease version', () => {
     const root = fixture('prerelease')
     bump('1.2.0-rc.1', { root })

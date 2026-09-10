@@ -45,8 +45,40 @@ export function renderBlock(content) {
   return `${MARKER_BEGIN}\n${content.trimEnd()}\n${MARKER_END}\n`
 }
 
+const SEPARATOR_TRAILER = '<!-- aanyberg/agent-conventions:separator='
+
+function markerIndexes(text, marker) {
+  const indexes = []
+  let index = text.indexOf(marker)
+  while (index !== -1) {
+    indexes.push(index)
+    index = text.indexOf(marker, index + marker.length)
+  }
+  return indexes
+}
+
+function blockRange(text) {
+  const begins = markerIndexes(text, MARKER_BEGIN)
+  const ends = markerIndexes(text, MARKER_END)
+  if (begins.length === 0 && ends.length === 0) return null
+  if (begins.length !== 1 || ends.length !== 1) {
+    throw new Error('package markers must appear exactly once as a complete block')
+  }
+  const start = begins[0]
+  const markerEnd = ends[0] + MARKER_END.length
+  if (markerEnd < start) throw new Error('package markers are out of order')
+
+  const trailer = /^<!-- aanyberg\/agent-conventions:separator=(0|1|2) -->\n/
+    .exec(text.slice(markerEnd + 1))
+  return {
+    start,
+    end: markerEnd + (trailer ? trailer[0].length + 1 : 0),
+    separatorLength: trailer ? Number(trailer[1]) : null,
+  }
+}
+
 export function hasBlock(text) {
-  return text.includes(MARKER_BEGIN) && text.includes(MARKER_END)
+  return blockRange(text) !== null
 }
 
 /**
@@ -57,16 +89,19 @@ export function hasBlock(text) {
  * silently eats a paragraph.
  */
 export function upsertBlock(existing, content) {
-  const block = renderBlock(content)
-  if (!hasBlock(existing)) {
-    const sep = existing.length === 0 || existing.endsWith('\n\n') ? '' : existing.endsWith('\n') ? '\n' : '\n\n'
-    return existing + sep + block
+  const existingBlock = blockRange(existing)
+  if (!existingBlock) {
+    const separator = existing.length === 0 || existing.endsWith('\n\n')
+      ? ''
+      : existing.endsWith('\n') ? '\n' : '\n\n'
+    return existing + separator + renderBlock(content) +
+      `${SEPARATOR_TRAILER}${separator.length} -->\n`
   }
-  const start = existing.indexOf(MARKER_BEGIN)
-  const end = existing.indexOf(MARKER_END) + MARKER_END.length
-  if (end < start) throw new Error('markers are out of order; refusing to edit')
-  const trailing = existing.slice(end).replace(/^\n/, '')
-  return existing.slice(0, start) + block + trailing
+  const trailing = existing.slice(existingBlock.end).replace(/^\n/, '')
+  const trailer = existingBlock.separatorLength === null
+    ? ''
+    : `${SEPARATOR_TRAILER}${existingBlock.separatorLength} -->\n`
+  return existing.slice(0, existingBlock.start) + renderBlock(content) + trailer + trailing
 }
 
 /**
@@ -78,11 +113,13 @@ export function upsertBlock(existing, content) {
  * install/uninstall cycle — the round-trip tests below are what caught it.
  */
 export function removeBlock(existing) {
-  if (!hasBlock(existing)) return existing
-  const start = existing.indexOf(MARKER_BEGIN)
-  const end = existing.indexOf(MARKER_END) + MARKER_END.length
-  const before = existing.slice(0, start)
-  const after = existing.slice(end).replace(/^\n/, '')
+  const block = blockRange(existing)
+  if (!block) return existing
+  const before = existing.slice(0, block.start)
+  const after = existing.slice(block.end).replace(/^\n/, '')
+  if (block.separatorLength !== null) {
+    return before.slice(0, -block.separatorLength) + after
+  }
   // Only collapse when the block sat at the end; mid-file, the surrounding
   // blank lines are the user's own and must survive untouched.
   const restored = after === '' ? before.replace(/\n\n$/, '\n') : before + after
@@ -108,7 +145,13 @@ export function planInstructionWrite(file) {
     }
   }
   const text = fs.readFileSync(file, 'utf8')
-  const kept = removeBlock(text).split('\n').filter(Boolean).length
+  let withoutBlock
+  try {
+    withoutBlock = removeBlock(text)
+  } catch (err) {
+    throw new Error(`${file}: ${err.message}`)
+  }
+  const kept = withoutBlock.split('\n').filter(Boolean).length
   return {
     file,
     action: hasBlock(text) ? 'update' : 'append',

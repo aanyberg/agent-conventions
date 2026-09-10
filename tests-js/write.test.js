@@ -124,6 +124,12 @@ describe('marker blocks', () => {
     assert.equal(removeBlock(installed), original)
   })
 
+  test('removeBlock restores content with no final newline byte-for-byte', () => {
+    const original = '# Theirs\n\nTheir paragraph.'
+    const installed = upsertBlock(original, 'ours')
+    assert.equal(removeBlock(installed), original)
+  })
+
   test('removeBlock empties a file we created outright', () => {
     assert.equal(removeBlock(renderBlock('only ours')), '')
   })
@@ -136,6 +142,17 @@ describe('marker blocks', () => {
   test('refuses to edit a file whose markers are inverted', () => {
     const broken = `${MARKER_END}\nstuff\n${MARKER_BEGIN}\n`
     assert.throws(() => upsertBlock(broken, 'x'), /out of order/)
+  })
+
+  test('refuses unmatched or duplicate package markers', () => {
+    for (const broken of [
+      `${MARKER_BEGIN}\nstuff\n`,
+      `${MARKER_END}\nstuff\n`,
+      `${MARKER_BEGIN}\nours\n${MARKER_END}\n${MARKER_BEGIN}\nother\n${MARKER_END}\n`,
+    ]) {
+      assert.throws(() => upsertBlock(broken, 'x'), /marker/)
+      assert.throws(() => removeBlock(broken), /marker/)
+    }
   })
 
   test('preserves markdown that itself contains marker-like text', () => {
@@ -166,6 +183,13 @@ describe('planning an instruction write', () => {
     const file = path.join(dir, 'd.md')
     fs.writeFileSync(file, 'one\ntwo\nthree\n')
     assert.match(planInstructionWrite(file).detail, /3 existing lines kept/)
+  })
+
+  test('includes the instruction path when package markers are malformed', () => {
+    const dir = scratch('plan-malformed-markers')
+    const file = path.join(dir, 'e.md')
+    fs.writeFileSync(file, `${MARKER_BEGIN}\nstuff\n`)
+    assert.throws(() => planInstructionWrite(file), new RegExp(`${file}.*marker`))
   })
 })
 

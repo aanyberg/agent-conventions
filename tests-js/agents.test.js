@@ -4,12 +4,22 @@ import { fileURLToPath } from 'node:url'
 import { describe, test } from 'node:test'
 
 import { parse as parseToml } from 'smol-toml'
+import { parse as parseYaml } from 'yaml'
 
 import { bundledAgents, parseCanonicalAgent, renderAgent } from '../src/agents.js'
 import { agentTargets } from '../src/targets.js'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const PROVIDERS = ['claude-code', 'codex', 'github-copilot', 'opencode', 'cursor', 'gemini-cli']
+
+function yamlHeader(output) {
+  const end = output.indexOf('\n---\n', 4)
+  assert.ok(output.startsWith('---\n') && end !== -1, 'must begin with YAML frontmatter')
+  return {
+    frontmatter: parseYaml(output.slice(4, end)),
+    body: output.slice(end + 5),
+  }
+}
 
 describe('canonical agents', () => {
   test('loads the six package-prefixed roles', () => {
@@ -133,6 +143,24 @@ describe('provider renderers', () => {
     assert.match(output, /^max_turns: 12$/m)
     assert.match(output, /^  - read_file$/m)
     assert.match(output, /^  - run_shell_command$/m)
+  })
+
+  test('every YAML renderer emits a parseable provider contract for every role', () => {
+    const expectedKeys = {
+      'claude-code': ['name', 'description', 'tools', 'model', 'effort', 'maxTurns', 'permissionMode'],
+      'github-copilot': ['name', 'description', 'tools'],
+      opencode: ['description', 'mode', 'permission'],
+      cursor: ['name', 'description', 'model', 'readonly', 'is_background'],
+      'gemini-cli': ['name', 'description', 'kind', 'tools', 'max_turns'],
+    }
+    for (const provider of Object.keys(expectedKeys)) {
+      for (const agent of agents) {
+        const { frontmatter, body } = yamlHeader(renderAgent(agent, provider))
+        assert.deepEqual(Object.keys(frontmatter).sort(), expectedKeys[provider].sort(), `${provider}: ${agent.name}`)
+        assert.ok(body.trim(), `${provider}: ${agent.name} body is empty`)
+        assert.equal(frontmatter.description, agent.description, `${provider}: ${agent.name}`)
+      }
+    }
   })
 })
 

@@ -261,6 +261,19 @@ export function removeSkillPath(file) {
 }
 
 /** Copy a skill directory, replacing any previous copy of the same skill. */
+export class SkillInstallRecoveryError extends Error {
+  constructor(destination, recoveryPath, cause) {
+    super(
+      `Failed to install skill at ${destination}; previous copy remains at ${recoveryPath}. ` +
+        'Resolve the conflicting destination before recovering it.',
+      { cause },
+    )
+    this.name = 'SkillInstallRecoveryError'
+    this.destination = destination
+    this.recoveryPath = recoveryPath
+  }
+}
+
 export function installSkill(sourceDir, destDir) {
   const parent = path.dirname(destDir)
   const at = classify(parent)
@@ -288,11 +301,7 @@ export function installSkill(sourceDir, destDir) {
           fs.renameSync(previous, destDir)
         } catch (rollbackErr) {
           preserveRecoveryCopy = true
-          throw new Error(
-            `Failed to install skill at ${destDir}; previous copy remains at ${previous}. ` +
-              'Resolve the conflicting destination before recovering it.',
-            { cause: rollbackErr },
-          )
+          throw new SkillInstallRecoveryError(destDir, previous, rollbackErr)
         }
       }
       throw err
@@ -342,7 +351,21 @@ export function readReceipt(file) {
   }
 }
 
+export function prepareReceiptWrite(file) {
+  const parent = path.dirname(file)
+  fs.mkdirSync(parent, { recursive: true })
+  fs.accessSync(parent, fs.constants.W_OK)
+}
+
 export function writeReceipt(file, receipt) {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(receipt, null, 2) + '\n', 'utf8')
+  const parent = path.dirname(file)
+  prepareReceiptWrite(file)
+  const stagingParent = fs.mkdtempSync(path.join(parent, `.${path.basename(file)}-`))
+  const staged = path.join(stagingParent, path.basename(file))
+  try {
+    fs.writeFileSync(staged, JSON.stringify(receipt, null, 2) + '\n', 'utf8')
+    fs.renameSync(staged, file)
+  } finally {
+    fs.rmSync(stagingParent, { recursive: true, force: true })
+  }
 }

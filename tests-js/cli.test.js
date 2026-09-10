@@ -464,9 +464,9 @@ describe('uninstall', () => {
     fs.writeFileSync(agent, 'foreign')
 
     const result = runResult(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
-    const output = `${result.stdout}${result.stderr}`
     assert.notEqual(result.status, 0)
-    assert.match(output, /REFUSED/)
+    assert.match(result.stderr, /unowned file exists here/)
+    assert.match(result.stderr, /Installation incomplete/)
     assert.equal(fs.readFileSync(agent, 'utf8'), 'foreign')
 
     run(['uninstall', '-p'], { home, cwd: project })
@@ -600,13 +600,14 @@ describe('uninstall does not take content the installer did not add', () => {
     const parent = path.dirname(agent)
     const originalMode = fs.statSync(parent).mode
     t.after(() => fs.chmodSync(parent, originalMode))
+    const receiptPath = path.join(project, '.agent-conventions.json')
+    fs.chmodSync(receiptPath, 0o400)
     fs.chmodSync(parent, 0o500)
 
     const failed = runResult(['uninstall', '-p'], { home, cwd: project })
     assert.notEqual(failed.status, 0)
     assert.match(failed.stderr, /Removal incomplete\. Receipt retained:/)
 
-    const receiptPath = path.join(project, '.agent-conventions.json')
     const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
     assert.equal(receipt.skills, null, 'successfully removed skill paths must not remain owned')
     assert.ok(receipt.agents.length > 0, 'unremovable agents must remain owned')

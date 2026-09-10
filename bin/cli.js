@@ -18,8 +18,8 @@ import { buildPlan, renderDisclosure } from '../src/plan.js'
 import { SELECTABLE_AGENTS, parseAgentSelection } from '../src/targets.js'
 import {
   applyInstructionWrite, applyManagedFileWrite, installSkill, linkSkill,
-  prepareSkillLinkDirectory, readReceipt, removeBlock, removeManagedFile,
-  removeSkillPath, writeReceipt,
+  prepareReceiptWrite, prepareSkillLinkDirectory, readReceipt, removeBlock,
+  removeManagedFile, removeSkillPath, SkillInstallRecoveryError, writeReceipt,
 } from '../src/write.js'
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -218,6 +218,7 @@ async function runInstall(opts) {
     }
   }
 
+  prepareReceiptWrite(plan.receipt)
   const receipt = {
     package: PKG.name, version: PKG.version, installedAt: new Date().toISOString(),
     scope,
@@ -234,6 +235,8 @@ async function runInstall(opts) {
     const retainedStalePaths = { dirs: [], links: [] }
     const retainedProviderLinks = []
     const removedStalePaths = new Set()
+    const recoveries = [...(plan.previousReceipt?.skills?.recoveries ?? [])]
+    const recoveryDestinations = new Set(recoveries.map((recovery) => recovery.destination))
     let canonicalPrepared = false
     let canonicalReady = false
     try {
@@ -258,12 +261,26 @@ async function runInstall(opts) {
       }
       for (const skill of plan.skills.sources) {
         const dest = path.join(plan.skills.canonical, skill.name)
+        const recovery = recoveries.find((entry) => entry.destination === dest)
+        if (recovery) {
+          throw new Error(
+            `${dest} has an unrecovered previous copy at ${recovery.recoveryPath}; ` +
+              'recover it manually before installing this skill again.',
+          )
+        }
         installSkill(skill.dir, dest)
         written.push(dest)
       }
       canonicalReady = true
     } catch (err) {
       incomplete = true
+      if (err instanceof SkillInstallRecoveryError) {
+        recoveryDestinations.add(err.destination)
+        recoveries.push({
+          destination: err.destination,
+          recoveryPath: err.recoveryPath,
+        })
+      }
       console.error(
         `SKIPPED skills     ${plan.skills.canonical}\n                   ${err.message}`,
       )
@@ -293,20 +310,25 @@ async function runInstall(opts) {
       }
     }
     const retainedPreviousPaths = (kind) => (
-      plan.previousReceipt?.skills?.[kind]?.filter((file) => !removedStalePaths.has(file)) ?? []
+      plan.previousReceipt?.skills?.[kind]?.filter((file) => (
+        !removedStalePaths.has(file) && !recoveryDestinations.has(file)
+      )) ?? []
+    )
+    const withRecoveries = (skills) => (
+      recoveries.length ? { ...skills, recoveries } : skills
     )
     receipt.skills = canonicalReady
-      ? {
+      ? withRecoveries({
           canonical: plan.skills.canonical,
           dirs: [...written, ...retainedStalePaths.dirs],
           links: [...new Set([...links, ...retainedStalePaths.links, ...retainedProviderLinks])],
-        }
+        })
       : canonicalPrepared
-        ? {
+        ? withRecoveries({
             canonical: plan.skills.canonical,
             dirs: [...new Set([...retainedPreviousPaths('dirs'), ...written])],
             links: retainedPreviousPaths('links'),
-          }
+          })
       : (plan.previousReceipt?.skills ?? null)
     receipt.mode = mode
     if (written.length) {
@@ -395,6 +417,7 @@ async function runUninstall(opts) {
     console.error(`No receipt at ${file} — nothing recorded as installed at ${scope} scope.`)
     return 1
   }
+  prepareReceiptWrite(file)
 
   const remaining = {
     ...receipt,
@@ -403,6 +426,12 @@ async function runUninstall(opts) {
     instructions: [],
   }
   let incomplete = false
+  for (const recovery of receipt.skills?.recoveries ?? []) {
+    incomplete = true
+    console.error(
+      `kept recovery ${recovery.recoveryPath}: recover it manually before removing ${recovery.destination}`,
+    )
+  }
 
   // Only ever remove what the receipt records. Never infer.
   const removeSkill = (file, kind) => {
@@ -466,7 +495,12 @@ async function runUninstall(opts) {
       console.error(`skipped  ${item.file}: ${err.message}`)
     }
   }
-  if (remaining.skills && !remaining.skills.dirs.length && !remaining.skills.links.length) {
+  if (
+    remaining.skills &&
+    !remaining.skills.dirs.length &&
+    !remaining.skills.links.length &&
+    !remaining.skills.recoveries?.length
+  ) {
     remaining.skills = null
   }
   if (incomplete) {

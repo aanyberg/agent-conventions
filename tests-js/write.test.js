@@ -19,7 +19,7 @@ import {
   applyInstructionWrite, applyManagedFileWrite, classify, contentDigest, hasBlock,
   installSkill, linkSkill, planInstructionWrite, planManagedFileWrite,
   planSkillLinkDirectory, prepareSkillLinkDirectory, removeBlock,
-  removeManagedFile, renderBlock, upsertBlock,
+  removeManagedFile, renderBlock, upsertBlock, writeReceipt,
 } from '../src/write.js'
 import { MARKER_BEGIN, MARKER_END, parseAgentSelection } from '../src/targets.js'
 
@@ -169,6 +169,20 @@ describe('planning an instruction write', () => {
   })
 })
 
+describe('receipts', () => {
+  test('replaces a read-only receipt when its parent is writable', (t) => {
+    const dir = scratch('read-only-receipt')
+    const receipt = path.join(dir, '.agent-conventions.json')
+    fs.writeFileSync(receipt, '{"version":"old"}\n')
+    t.after(() => fs.chmodSync(receipt, 0o600))
+    fs.chmodSync(receipt, 0o400)
+
+    writeReceipt(receipt, { version: 'new' })
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(receipt, 'utf8')), { version: 'new' })
+  })
+})
+
 describe('skills', () => {
   test('installSkill replaces a previous copy rather than merging into it', () => {
     const dir = scratch('skill-replace')
@@ -224,10 +238,16 @@ describe('skills', () => {
     }
     t.after(() => { fs.renameSync = rename })
 
-    assert.throws(
-      () => installSkill(src, dest),
-      /previous copy remains at/,
-    )
+    let error
+    try {
+      installSkill(src, dest)
+    } catch (err) {
+      error = err
+    }
+    assert.ok(error)
+    assert.match(error.message, /previous copy remains at/)
+    assert.equal(error.destination, dest)
+    assert.match(error.recoveryPath, /\/previous$/)
 
     const backupParent = fs.readdirSync(path.dirname(dest))
       .find((name) => name.startsWith('.demo-'))

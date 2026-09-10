@@ -438,11 +438,13 @@ describe('uninstall', () => {
 
     const update = runResult(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
     assert.notEqual(update.status, 0)
-    assert.match(`${update.stdout}${update.stderr}`, /REFUSED/)
+    assert.match(update.stderr, /managed file was modified/)
+    assert.match(update.stderr, /Installation incomplete/)
     assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
 
     const uninstall = runResult(['uninstall', '-p'], { home, cwd: project })
     assert.notEqual(uninstall.status, 0)
+    assert.match(uninstall.stderr, /Removal incomplete/)
     assert.ok(fs.existsSync(agent), 'a modified generated agent must survive uninstall')
     assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
     const receipt = JSON.parse(fs.readFileSync(path.join(project, '.agent-conventions.json'), 'utf8'))
@@ -521,7 +523,7 @@ describe('argument handling', () => {
     const { home, project } = sandbox('missing-option-value')
     const result = runResult(['-p', '--agent'], { home, cwd: project })
     assert.notEqual(result.status, 0)
-    assert.match(`${result.stdout}${result.stderr}`, /requires a value/)
+    assert.match(result.stderr, /requires a value/)
     assert.ok(!fs.existsSync(path.join(project, '.agents')))
   })
 
@@ -529,7 +531,7 @@ describe('argument handling', () => {
     const { home, project } = sandbox('unexpected-positional')
     const result = runResult(['not-a-command', '-p'], { home, cwd: project })
     assert.notEqual(result.status, 0)
-    assert.match(`${result.stdout}${result.stderr}`, /unexpected argument/)
+    assert.match(result.stderr, /unexpected argument/)
     assert.ok(!fs.existsSync(path.join(project, '.agents')))
   })
 
@@ -537,7 +539,7 @@ describe('argument handling', () => {
     const { home, project } = sandbox('duplicate-command')
     const result = runResult(['uninstall', 'install', '-p'], { home, cwd: project })
     assert.notEqual(result.status, 0)
-    assert.match(`${result.stdout}${result.stderr}`, /unexpected argument/)
+    assert.match(result.stderr, /unexpected argument/)
     assert.ok(!fs.existsSync(path.join(project, '.agents')))
   })
 

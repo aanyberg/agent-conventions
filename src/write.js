@@ -273,6 +273,7 @@ export function installSkill(sourceDir, destDir) {
   const staged = path.join(stagingParent, path.basename(destDir))
   const previous = path.join(stagingParent, 'previous')
   let movedPrevious = false
+  let preserveRecoveryCopy = false
   try {
     fs.cpSync(sourceDir, staged, { recursive: true })
     if (classify(destDir).kind !== 'absent') {
@@ -282,11 +283,22 @@ export function installSkill(sourceDir, destDir) {
     try {
       fs.renameSync(staged, destDir)
     } catch (err) {
-      if (movedPrevious) fs.renameSync(previous, destDir)
+      if (movedPrevious) {
+        try {
+          fs.renameSync(previous, destDir)
+        } catch (rollbackErr) {
+          preserveRecoveryCopy = true
+          throw new Error(
+            `Failed to install skill at ${destDir}; previous copy remains at ${previous}. ` +
+              'Resolve the conflicting destination before recovering it.',
+            { cause: rollbackErr },
+          )
+        }
+      }
       throw err
     }
   } finally {
-    fs.rmSync(stagingParent, { recursive: true, force: true })
+    if (!preserveRecoveryCopy) fs.rmSync(stagingParent, { recursive: true, force: true })
   }
 }
 

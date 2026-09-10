@@ -4,8 +4,11 @@ A collection of specialized agents, skills, and development guidelines for AI co
 
 This repository contains:
 
-- **`skills/` and `agents/`** — The repository root is itself a Claude Code plugin (`conventions`), so these sit at the top level rather than nested under a plugin directory. That is also where the wider agent ecosystem scans for `SKILL.md` files. See [docs/CONSUMER.md](docs/CONSUMER.md) for how a consumer repo loads them via the `aanyberg` marketplace, with no copying into `~/.claude`.
-  - **Agents** — Specialized multi-step task runners for common development workflows (feature planning, refactoring, documentation updates, etc.)
+- **`skills/` and `agent-sources/`** — Skills follow the Agent Skills
+  specification. Agent sources remain outside provider auto-discovery; the
+  installer renders them into each provider's native format and directory.
+  - **Agents** — Six specialized roles for planning, implementation, review,
+    documentation synchronization, repository research, and verification
   - **Skills** — Focused knowledge modules covering code standards, best practices, and workflows across Python, TypeScript, and general development
 - **Instructions** — A single `AGENTS.md` file with project-level guidance that works across all supported tools
 
@@ -16,7 +19,7 @@ These components enhance AI coding assistants by providing domain knowledge, cod
 ### Everything, one command
 
 ```bash
-# this machine, every project — skills and global instructions
+# this machine, every project — skills, agents, and global instructions
 npx github:aanyberg/agent-conventions -g
 
 # preview without writing anything
@@ -68,9 +71,31 @@ Agent flags: `claude-code`, `codex`, `github-copilot`, `opencode`, `cursor`, `ge
 
 Because Claude Code is a symlink into the same files, there is no duplicate to drift. At project scope, commit `.agents/skills/` and gitignore `.claude/skills/`.
 
+### Agents — every target provider
+
+The installer renders the canonical [`agent-sources/`](agent-sources) corpus into each
+selected provider's native format. Generated agents are real files rather than
+symlinks because frontmatter, tool names, permissions, and even the file format
+differ by provider.
+
+| Provider | Project path | Global path |
+| --- | --- | --- |
+| Claude Code | `.claude/agents/*.md` | `~/.claude/agents/*.md` |
+| Codex | `.codex/agents/*.toml` | `~/.codex/agents/*.toml` |
+| GitHub Copilot | `.github/agents/*.agent.md` | `~/.copilot/agents/*.agent.md` |
+| OpenCode | `.opencode/agents/*.md` | `~/.config/opencode/agents/*.md` |
+| Cursor | `.cursor/agents/*.md` | `~/.cursor/agents/*.md` |
+| Gemini CLI | `.gemini/agents/*.md` | `~/.gemini/agents/*.md` |
+
+Every emitted name starts with `conventions-`. The receipt stores a digest for
+each generated file: updates refuse foreign collisions, and uninstall preserves
+any managed agent a user modified after installation.
+
 ### Native plugin install
 
-Each ecosystem has its own manifest, all pointing at the same top-level [`skills/`](skills):
+Each ecosystem has its own manifest pointing at the same top-level
+[`skills/`](skills). Native plugin installation is intentionally skills-only;
+use the package installer above when provider-native agents are also required:
 
 ```bash
 # Codex, Cursor, ChatGPT, Kiro, VS Code — via the Agent Plugins standard
@@ -83,9 +108,11 @@ gemini extensions install aanyberg/agent-conventions       # Gemini CLI
 
 Codex discovers the repo through `.codex-plugin/plugin.json`; Copilot CLI reads the same `.claude-plugin/marketplace.json` Claude Code does.
 
-### Skills & agents — Claude Code plugin
+### Skills — Claude Code plugin
 
-The plugin route additionally installs the [`agents/`](agents), which are Claude-specific, and updates through `claude plugin update` rather than re-running an installer:
+The plugin route installs skills and updates through `claude plugin update`.
+Canonical agent sources are not exposed directly because their metadata is not
+valid provider configuration; use the package installer for agents:
 
 ```bash
 claude plugin marketplace add aanyberg/agent-conventions
@@ -138,6 +165,8 @@ Whatever put this on your machine is what takes it off — the routes do not cle
 It works from the receipt written at install time, so it removes **exactly** what was installed and nothing adjacent:
 
 - every skill directory it created, and the links it made into `.claude/skills/`
+- every generated agent that is still byte-identical to the installed copy;
+  modified agents are retained and reported
 - its block from each instruction file, leaving your own content byte-for-byte as it was — and deleting the file outright only if the installer created it and nothing else is in it
 - the receipt itself
 
@@ -161,8 +190,14 @@ The other order strands the files with the tool gone. Recoverable — the receip
 If the receipt is gone, or you would rather see exactly what is there, these are all the paths the installer ever writes. Substitute the project root for `~` if you installed with `-p`:
 
 ```bash
-~/.agents/skills/          # the 19 skills — the real files
+~/.agents/skills/          # the 17 skills — the real files
 ~/.claude/skills/          # links into the above
+~/.claude/agents/          # generated Claude agents
+~/.codex/agents/           # generated Codex TOML agents
+~/.copilot/agents/         # generated Copilot agents
+~/.config/opencode/agents/ # generated OpenCode agents
+~/.cursor/agents/          # generated Cursor agents
+~/.gemini/agents/          # generated Gemini agents
 ~/.agent-conventions.json  # the receipt
 ```
 
@@ -215,11 +250,10 @@ so the single copy stays installable in every other agent, and runs the shipped 
 scripts end to end in throwaway git repos.
 
 ```bash
-uv run --frozen pytest tests   # structure, skills, agents, manifests
-node --test tests-js/           # the installer and the version bump
+npm test
 ```
 
-It takes about two seconds and needs no API access or GitHub auth — `gh` is stubbed.
+It needs no API access or GitHub auth — `gh` is stubbed.
 `.github/workflows/validate.yml` gates every pull request on Linux, and repeats the
 suite on macOS after merge to `main` as a canary.
 
@@ -232,13 +266,13 @@ What it checks:
 | Install manifests | the four ecosystem manifests parse, declare the same version, and point at the same `skills/`; `plugin.json` matches the Agent Plugins name grammar and carries no key outside its schema, which sets `additionalProperties: false` so an extra key invalidates the file rather than being ignored |
 | Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |
 | Skills | frontmatter has `name` and `description`, `name` matches the directory, names are unique, descriptions fit the loader budget, and every key is one the Agent Skills spec permits — `version` is not one of them, it belongs inside `metadata` |
-| Agents | `name` matches the filename and is kebab-case; `tools`, `model`, `effort`, `maxTurns`, and `permissionMode` are present and valid; `plan`-mode agents declare no write tools |
+| Agents | canonical names are package-prefixed; abstract capabilities, access, model tier, effort, and turn limits are valid; read-only roles cannot request writes; every provider renderer preserves identity and behavior |
 | References | relative markdown links resolve, shipped scripts are executable with a shebang, and every skill or agent named in prose exists |
 | Policy | `policy.example.yml` parses, has exactly one copy, keeps the `backend: auto` line `generate-policy.sh` substitutes, and contains every key the skills read |
 | Scripts | `detect-backend.sh` and `generate-policy.sh` run against real git repos with a stubbed `gh`: explicit and auto backend resolution, the incomplete-migration guard, idempotent generation, a missing template, and a round trip proving what one writes the other reads back |
-| Shell lint | `shellcheck --severity=warning` over every shipped script, using the binary vendored by `shellcheck-py` so no separate install is needed |
+| Shell lint | ShellCheck 0.11.0 with `--severity=warning` over every shipped script; `npm test` downloads the official platform binary once and verifies its SHA-256 digest |
 | Cross-agent portability | the repo ships one copy of each skill, so no skill or agent body may depend on a single vendor: no interpolated `${CLAUDE_*}` variable, no vendor component directory (`.claude/skills/`, `.cursor/rules/`, …), no vendor instruction file (`CLAUDE.md`, `copilot-instructions.md`), and no tool named from one agent's vocabulary. Naming a vendor directory as somewhere *not* to write stays legal — `task-workflow` does exactly that with `~/.claude` and `~/.copilot`. Each rule is pinned to a sample it must catch and a sample it must ignore, so a regex that rots fails loudly instead of passing on everything |
 | Script portability | shipped scripts use no GNU-only regex escape (`\s`, `\d`, `\w`, …) or flag (`grep -P`, bare `sed -i`, `readlink -f`, `date -d`). shellcheck does not parse regex arguments, and a `\s` in `sed -E` silently produced a wrong backend on macOS while passing every Linux run |
 
-Adding a skill or agent needs no test changes — the suite discovers files by glob and
-parametrises per file, so each one fails independently with its own path in the failure.
+Adding a skill or agent needs no test changes — the suite discovers files dynamically
+and creates a subtest per file, so each one fails independently with its own path.

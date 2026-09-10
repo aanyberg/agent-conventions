@@ -14,12 +14,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
-        with:
-          enable-cache: true
       - uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: npm
+      - run: npm ci
 
       # The tag is the release's identity. If it disagrees with package.json,
       # npm would publish a version nobody can find from the git history.
@@ -29,8 +28,7 @@ jobs:
           echo "Tag says: $tag"
           node scripts/bump-version.mjs "$tag" --check
 
-      - run: uv run --frozen pytest tests
-      - run: node --test tests-js/
+      - run: npm test
 
       # Catch a broken `files` list before publishing rather than after: an
       # omitted skills/ directory produces a package that installs nothing.
@@ -41,10 +39,10 @@ jobs:
           tarball="/tmp/$(npm pack --pack-destination /tmp --silent)"
           echo "TARBALL=$tarball" >> "$GITHUB_ENV"
           skills=$(tar -tzf "$tarball" | grep -c 'skills/.*/SKILL.md' || true)
-          agents=$(tar -tzf "$tarball" | grep -c 'package/agents/.*\.md' || true)
+          agents=$(tar -tzf "$tarball" | grep -c 'package/agent-sources/.*\.md' || true)
           echo "skills=$skills agents=$agents"
-          test "$skills" -ge 19 || { echo "::error::only $skills skills in the tarball"; exit 1; }
-          test "$agents" -ge 7 || { echo "::error::only $agents agents in the tarball"; exit 1; }
+          test "$skills" -ge 17 || { echo "::error::only $skills skills in the tarball"; exit 1; }
+          test "$agents" -ge 6 || { echo "::error::only $agents agents in the tarball"; exit 1; }
           tar -tzf "$tarball" | grep -q 'package/AGENTS.md' || { echo "::error::AGENTS.md missing"; exit 1; }
           tar -tzf "$tarball" | grep -q 'package/bin/cli.js' || { echo "::error::bin/cli.js missing"; exit 1; }
 
@@ -56,9 +54,11 @@ jobs:
           cd "$proj" && npm init -y >/dev/null && npm i --no-audit --no-fund "$TARBALL" >/dev/null
           HOME="$home" npx agent-conventions -g -a all -y >/dev/null
           test -f "$home/.agents/skills/git-conventions/SKILL.md" || { echo "::error::skills not installed"; exit 1; }
+          test -f "$home/.codex/agents/conventions-code-reviewer.toml" || { echo "::error::agents not installed"; exit 1; }
           test -f "$home/.claude/CLAUDE.md" || { echo "::error::instructions not installed"; exit 1; }
           HOME="$home" npx agent-conventions uninstall -g >/dev/null
           test ! -e "$home/.agents/skills/git-conventions" || { echo "::error::uninstall left files behind"; exit 1; }
+          test ! -e "$home/.codex/agents/conventions-code-reviewer.toml" || { echo "::error::uninstall left agents behind"; exit 1; }
           echo "install/uninstall round trip OK"
 
   publish:

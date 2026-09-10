@@ -1,6 +1,5 @@
 .DS_Store
-__pycache__/
-.pytest_cache/
-.venv/
+.cache/
 node_modules/
 *.tgz
+.planning/

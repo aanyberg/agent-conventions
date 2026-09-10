@@ -22,7 +22,8 @@ Load language skills based on the files being changed. Each language skill carri
 - **TypeScript / JavaScript** (`.ts`, `.tsx`, `.js`, `.jsx`): load `typescript-coding-guidelines`
 - **Rust** (`.rs`, `Cargo.toml`): load `rust-best-practices` + `rust-coding-guidelines`; also load `rust-design-patterns` when designing or refactoring component structure
 - **Docs** (`.md`, `README`, `CHANGELOG`, role/layer docs): load `docs-standards`
-- **Hatch projects**: load `hatch-workflow` for test, lint, and build entrypoints
+- **Project tooling**: use the repository's documented test, lint, type-check,
+  and build entrypoints rather than assuming a package manager or task runner
 
 ### Semantic Versioning
 - **Source of truth:** `pyproject.toml` (Python) or `package.json` (Node.js/TypeScript)

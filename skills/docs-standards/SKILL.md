@@ -17,17 +17,20 @@ Load this skill when:
 - Documenting a public API, module, or behavioural change
 - Reviewing a pull request that changes documentation
 
-For **multi-file doc synchronisation** after a code change — mapping a diff to every affected page and maintaining release traceability — hand off to a separate subagent dedicated to documentation sync, if your tool supports one (in Claude Code this is the **docs-change-steward** agent), which enforces these same standards at scale.
+For **multi-file doc synchronisation** after a code change — mapping a diff to
+every affected page and maintaining release traceability — hand off to a
+documentation-sync subagent when available. The package installer provides the
+optional **conventions-docs-steward** agent for this role.
 
 ## Where Documentation Lives
 
-| Doc | Location | Owning skill (+ Claude Code agent, if used) |
+| Doc | Location | Owning skill (+ optional installed agent) |
 |-----|----------|----------------------|
 | Project overview | `README.md` | docs-standards |
 | Release history | `CHANGELOG.md` | docs-standards + code-standards (versioning) |
 | System-as-is + ADRs | `.planning/architecture.md` | architecture-planning |
-| Role behaviour | `docs/roles/*.md` | docs-standards (docs-change-steward) |
-| Layer / locked-version tables | layer docs | docs-standards (docs-change-steward) |
+| Role behaviour | `docs/roles/*.md` | docs-standards (conventions-docs-steward) |
+| Layer / locked-version tables | layer docs | docs-standards (conventions-docs-steward) |
 | Task / backlog records | `.planning/tasks/`, `BACKLOG.md` | task-workflow, backlog-management |
 
 Keep each doc in its canonical location. Do not duplicate the same information across files — link instead.
@@ -65,7 +68,8 @@ Follow *Keep a Changelog* with Semantic Versioning. The version source of truth 
 
 ## Role Doc Layout (mandatory)
 
-When creating or updating a role document under `docs/roles/*.md`, use this exact top-level section order so files stay consistent with the format a documentation-sync subagent expects (in Claude Code, the **docs-change-steward** agent):
+When creating or updating a role document under `docs/roles/*.md`, use this
+exact top-level section order so files stay consistent with the optional **conventions-docs-steward** agent:
 
 1. `## What is this role?`
 2. `## What does this role do?`

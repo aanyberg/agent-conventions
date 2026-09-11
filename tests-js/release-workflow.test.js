@@ -20,3 +20,17 @@ test('release workflow uses bare numeric-looking tags and validates full semver'
   assert.match(verify.run, /bump-version\.mjs "\$tag" --check/)
   assert.doesNotMatch(verify.run, /#v/)
 })
+
+test('release workflow pins npm to a Node 20-compatible major', () => {
+  const source = fs.readFileSync(WORKFLOW, 'utf8')
+  const workflow = parseYaml(source)
+  const installNpm = workflow.jobs.publish.steps.find((step) => step.run?.includes('npm install -g npm@'))
+
+  assert.ok(installNpm, 'publish job must install npm for trusted publishing')
+  assert.match(installNpm.run, /^npm install -g npm@11$/)
+  assert.doesNotMatch(installNpm.run, /npm@latest/)
+  assert.ok(
+    workflow.jobs.publish.steps.some((step) => step.run === 'npm stage publish --access public'),
+    'publish job must stage rather than directly publish the package',
+  )
+})

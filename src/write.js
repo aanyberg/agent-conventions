@@ -186,6 +186,18 @@ export function applyManagedFileWrite(plan, content) {
 
 /** Remove a generated file only while it is still byte-identical to our receipt. */
 export function removeManagedFile(entry) {
+  const parent = classify(path.dirname(entry.file))
+  if (parent.kind === 'symlink') {
+    return {
+      ...entry,
+      removed: false,
+      reason: `parent is a symlink → ${parent.resolved}; refusing to remove through it`,
+    }
+  }
+  if (parent.kind === 'absent') return { ...entry, removed: false, reason: 'already absent' }
+  if (parent.kind !== 'directory') {
+    return { ...entry, removed: false, reason: `parent is ${parent.kind}` }
+  }
   const at = classify(entry.file)
   if (at.kind === 'absent') return { ...entry, removed: false, reason: 'already absent' }
   if (at.kind !== 'file') return { ...entry, removed: false, reason: `path is a ${at.kind}` }

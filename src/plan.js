@@ -12,7 +12,7 @@ import path from 'node:path'
 import { bundledAgents, renderAgent } from './agents.js'
 import { agentTargets, instructionTargets, receiptPath, skillTargets } from './targets.js'
 import {
-  planInstructionWrite, planManagedFileRemoval, planManagedFileWrite,
+  contentDigest, planInstructionWrite, planManagedFileRemoval, planManagedFileWrite,
   planSkillLinkDirectory, readReceipt,
 } from './write.js'
 
@@ -34,6 +34,7 @@ export function buildPlan({
   home,
   cwd,
   copy = false,
+  replaceSymlinks = false,
 }) {
   const receipt = receiptPath(scope, { home, cwd })
   const previousReceipt = readReceipt(receipt)
@@ -41,6 +42,7 @@ export function buildPlan({
     scope,
     components,
     mode: copy ? 'copy' : 'symlink',
+    replaceSymlinks,
     skills: null,
     staleSkillPaths: [],
     agents: [],
@@ -80,23 +82,49 @@ export function buildPlan({
     const owned = new Map((previousReceipt?.agents ?? []).map((entry) => [entry.file, entry]))
     plan.agents = agentTargets(scope, { home, cwd })
       .filter((target) => agents.includes(target.agent))
-      .map((target) => ({
-        ...target,
-        files: sources.map((source) => {
-          const content = renderAgent(source, target.agent)
-          const file = path.join(target.dir, `${source.name}${target.suffix}`)
-          return {
-            name: source.name,
-            content,
-            ...planManagedFileWrite(file, content, owned.get(file)),
-          }
-        }),
-      }))
+      .map((target) => {
+        const directoryPlan = planSkillLinkDirectory(target.dir)
+        return {
+          ...target,
+          directoryPlan,
+          files: sources.map((source) => {
+            const content = renderAgent(source, target.agent)
+            const file = path.join(target.dir, `${source.name}${target.suffix}`)
+            if (directoryPlan.action !== 'use') {
+              return {
+                name: source.name,
+                content,
+                file,
+                action: 'create',
+                detail: 'creates file',
+                desiredDigest: contentDigest(content),
+                owned: owned.get(file),
+              }
+            }
+            return {
+              name: source.name,
+              content,
+              ...planManagedFileWrite(file, content, owned.get(file)),
+            }
+          }),
+        }
+      })
     const desired = new Set(plan.agents.flatMap((target) => target.files.map((file) => file.file)))
     const selectedProviders = new Set(plan.agents.map((target) => target.agent))
+    const directoryPlans = new Map(
+      plan.agents.map((target) => [target.agent, target.directoryPlan]),
+    )
     plan.staleAgents = (previousReceipt?.agents ?? [])
       .filter((entry) => selectedProviders.has(entry.provider) && !desired.has(entry.file))
-      .map(planManagedFileRemoval)
+      .map((entry) => {
+        const directoryPlan = directoryPlans.get(entry.provider)
+        if (directoryPlan.action === 'use') return planManagedFileRemoval(entry)
+        if (directoryPlan.action === 'create' ||
+            (directoryPlan.action === 'refuse-symlink' && replaceSymlinks)) {
+          return { ...entry, action: 'forget', detail: 'provider directory will be created' }
+        }
+        return { ...entry, action: 'keep', detail: 'provider directory is refused' }
+      })
   }
 
   if (components.includes('instructions')) {
@@ -118,6 +146,7 @@ export function buildPlan({
 export function renderDisclosure(plan, { packageVersion }) {
   const lines = []
   const where = plan.scope === 'global' ? 'GLOBAL' : 'PROJECT'
+  const replacesSymlink = (item) => plan.replaceSymlinks && item.action === 'refuse-symlink'
   lines.push(`agent-conventions ${packageVersion} — ${where} scope`)
   lines.push('')
 
@@ -129,14 +158,21 @@ export function renderDisclosure(plan, { packageVersion }) {
   if (plan.skills) {
     lines.push(`  ${plan.skills.canonical}`)
     if (plan.skills.canonicalPlan.action === 'create' ||
-        plan.skills.canonicalPlan.action === 'use') {
+        plan.skills.canonicalPlan.action === 'use' ||
+        replacesSymlink(plan.skills.canonicalPlan)) {
+      if (replacesSymlink(plan.skills.canonicalPlan)) {
+        lines.push(`      replace   ${plan.skills.canonical} (${plan.skills.canonicalPlan.detail})`)
+      }
       lines.push(`      ${plan.skills.names.length} skills — read by ${plan.skills.canonicalReadBy.join(', ')}`)
     } else {
       lines.push(`      refused: ${plan.skills.canonicalPlan.detail}`)
     }
     for (const link of plan.skills.links) {
       lines.push(`  ${link.dir}`)
-      if (link.action === 'create' || link.action === 'use') {
+      if (link.action === 'create' || link.action === 'use' || replacesSymlink(link)) {
+        if (replacesSymlink(link)) {
+          lines.push(`      replace   ${link.dir} (${link.detail})`)
+        }
         lines.push(`      ${plan.mode} entries → the directory above (${link.label} does not read .agents/skills)`)
       } else {
         lines.push(`      refused: ${link.detail}`)
@@ -154,9 +190,18 @@ export function renderDisclosure(plan, { packageVersion }) {
   if (plan.agents.length) {
     for (const target of plan.agents) {
       lines.push(`  ${target.dir}`)
-      lines.push(`      ${target.files.length} generated agents for ${target.label}`)
-      for (const file of target.files) {
-        lines.push(`      ${file.action.padEnd(9)} ${file.file}`)
+      if (target.directoryPlan.action === 'create' ||
+          target.directoryPlan.action === 'use' ||
+          replacesSymlink(target.directoryPlan)) {
+        if (replacesSymlink(target.directoryPlan)) {
+          lines.push(`      replace   ${target.dir} (${target.directoryPlan.detail})`)
+        }
+        lines.push(`      ${target.files.length} generated agents for ${target.label}`)
+        for (const file of target.files) {
+          lines.push(`      ${file.action.padEnd(9)} ${file.file}`)
+        }
+      } else {
+        lines.push(`      refused: ${target.directoryPlan.detail}`)
       }
     }
     lines.push('')
@@ -178,7 +223,7 @@ export function renderDisclosure(plan, { packageVersion }) {
   if (plan.instructions.length) {
     for (const item of plan.instructions) {
       lines.push(`  ${item.file}`)
-      lines.push(`      ${item.detail}`)
+      lines.push(`      ${replacesSymlink(item) ? `replaces ${item.detail}` : item.detail}`)
     }
     lines.push('')
     lines.push('  Content is wrapped in <!-- BEGIN/END aanyberg/agent-conventions --> markers.')
@@ -187,18 +232,26 @@ export function renderDisclosure(plan, { packageVersion }) {
   }
 
   const replaceableInstructionSymlinks = plan.instructions.filter(
-    (item) => item.action === 'refuse-symlink',
+    (item) => item.action === 'refuse-symlink' && !plan.replaceSymlinks,
   )
   const replaceableSkillSymlinks = plan.skills?.links.filter(
-    (link) => link.action === 'refuse-symlink',
+    (link) => link.action === 'refuse-symlink' && !plan.replaceSymlinks,
   ) ?? []
-  const replaceableCanonicalSymlink = plan.skills?.canonicalPlan.action === 'refuse-symlink'
+  const replaceableCanonicalSymlink = plan.skills?.canonicalPlan.action === 'refuse-symlink' &&
+    !plan.replaceSymlinks
     ? [plan.skills.canonicalPlan]
     : []
+  const replaceableAgentSymlinks = plan.agents
+    .filter((target) => target.directoryPlan.action === 'refuse-symlink' && !plan.replaceSymlinks)
+    .map((target) => target.directoryPlan)
   if (replaceableInstructionSymlinks.length || replaceableSkillSymlinks.length ||
-      replaceableCanonicalSymlink.length) {
+      replaceableCanonicalSymlink.length || replaceableAgentSymlinks.length) {
     lines.push('  REFUSED without --replace-symlinks:')
-    for (const link of [...replaceableCanonicalSymlink, ...replaceableSkillSymlinks]) {
+    for (const link of [
+      ...replaceableCanonicalSymlink,
+      ...replaceableSkillSymlinks,
+      ...replaceableAgentSymlinks,
+    ]) {
       lines.push(`    ${link.dir} is a ${link.detail}`)
     }
     for (const r of replaceableInstructionSymlinks) {
@@ -214,6 +267,9 @@ export function renderDisclosure(plan, { packageVersion }) {
       : []),
     ...(plan.skills?.links.filter((link) => link.action === 'refuse') ?? [])
       .map((link) => ({ file: link.dir, detail: link.detail })),
+    ...plan.agents
+      .filter((target) => target.directoryPlan.action === 'refuse')
+      .map((target) => ({ file: target.dir, detail: target.directoryPlan.detail })),
     ...plan.instructions.filter((item) => item.action === 'refuse'),
   ]
   if (pathConflicts.length) {

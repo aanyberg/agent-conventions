@@ -9,7 +9,7 @@
  */
 
 import assert from 'node:assert/strict'
-import { execFileSync } from 'node:child_process'
+import { spawnSync } from 'node:child_process'
 import crypto from 'node:crypto'
 import fs from 'node:fs'
 import os from 'node:os'
@@ -25,16 +25,23 @@ after(() => { fs.rmSync(tmp, { recursive: true, force: true }) })
 
 /** Run the CLI with an isolated HOME and cwd. Never touches the real machine. */
 function run(args, { home, cwd, expectFail = false } = {}) {
-  try {
-    return execFileSync(process.execPath, [CLI, ...args], {
-      cwd: cwd ?? home,
-      encoding: 'utf8',
-      env: { ...process.env, HOME: home, USERPROFILE: home, CI: '1' },
-    })
-  } catch (err) {
-    if (expectFail) return (err.stdout ?? '') + (err.stderr ?? '')
-    throw new Error(`CLI failed: ${err.stdout}\n${err.stderr}`)
+  const result = runResult(args, { home, cwd })
+  if (result.status === 0 && !expectFail) return result.stdout
+  const output = `${result.stdout}${result.stderr}`
+  if (expectFail) {
+    assert.notEqual(result.status, 0, `expected CLI failure: ${output}`)
+    assert.notEqual(result.stderr, '', 'CLI failures must explain themselves on stderr')
+    return output
   }
+  throw new Error(`CLI failed: ${output}`)
+}
+
+function runResult(args, { home, cwd } = {}) {
+  return spawnSync(process.execPath, [CLI, ...args], {
+    cwd: cwd ?? home,
+    encoding: 'utf8',
+    env: { ...process.env, HOME: home, USERPROFILE: home, CI: '1' },
+  })
 }
 
 function sandbox(name) {
@@ -114,7 +121,7 @@ describe('global scope', () => {
     fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
     fs.symlinkSync(missing, claudeSkills)
 
-    const output = run(['-g', '-a', 'all', '-y'], { home })
+    const output = run(['-g', '-a', 'all', '-y'], { home, expectFail: true })
 
     assert.match(output, /REFUSED without --replace-symlinks/)
     assert.ok(fs.lstatSync(claudeSkills).isSymbolicLink())
@@ -135,7 +142,7 @@ describe('global scope', () => {
     fs.mkdirSync(path.dirname(canonical), { recursive: true })
     fs.symlinkSync(missing, canonical)
 
-    const output = run(['-g', '-a', 'all', '-y'], { home })
+    const output = run(['-g', '-a', 'all', '-y'], { home, expectFail: true })
 
     assert.match(output, /REFUSED without --replace-symlinks/)
     assert.ok(fs.lstatSync(canonical).isSymbolicLink())
@@ -188,7 +195,7 @@ describe('global scope', () => {
     fs.mkdirSync(path.dirname(claudeSkills), { recursive: true })
     fs.writeFileSync(claudeSkills, 'foreign')
 
-    const output = run(['-g', '-a', 'all', '-y'], { home })
+    const output = run(['-g', '-a', 'all', '-y'], { home, expectFail: true })
 
     assert.match(output, /REFUSED path conflicts/)
     assert.match(output, /a file exists here/)
@@ -252,6 +259,62 @@ describe('global scope', () => {
     run(['-p', '-a', 'codex', '-c', 'skills', '-y'], { home, cwd: project })
     assert.ok(!fs.existsSync(stale), 'an obsolete package-owned skill path must be removed')
   })
+
+  test('retains stale skill links after a failed cleanup and removes them on retry', () => {
+    const { home } = sandbox('retry-stale-skill-links')
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    const foreign = path.join(home, 'foreign-skills')
+    fs.renameSync(claudeSkills, foreign)
+    fs.symlinkSync(foreign, claudeSkills)
+
+    const failed = runResult(['-g', '-a', 'codex', '-c', 'skills', '-y'], { home })
+    assert.notEqual(failed.status, 0)
+    const retained = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(retained.skills.links.length > 0, 'failed stale links must remain retryable')
+
+    fs.unlinkSync(claudeSkills)
+    fs.renameSync(foreign, claudeSkills)
+    run(['-g', '-a', 'codex', '-c', 'skills', '-y'], { home })
+    const retried = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.deepEqual(retried.skills.links, [])
+  })
+
+  test('retains selected skill links when their managed root becomes a symlink', () => {
+    const { home } = sandbox('retain-selected-skill-links')
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+
+    const claudeSkills = path.join(home, '.claude', 'skills')
+    const foreign = path.join(home, 'foreign-skills')
+    fs.renameSync(claudeSkills, foreign)
+    fs.symlinkSync(foreign, claudeSkills)
+
+    const failed = runResult(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+    assert.notEqual(failed.status, 0)
+    const retained = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(retained.skills.links.length > 0, 'failed selected links must remain retryable')
+
+    const uninstall = runResult(['uninstall', '-g'], { home })
+    assert.notEqual(uninstall.status, 0)
+    assert.ok(fs.existsSync(path.join(home, '.agent-conventions.json')))
+  })
+
+  test('retains managed skills when a canonical refresh fails after preparation', (t) => {
+    const { home } = sandbox('retain-failed-canonical-refresh')
+    run(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+
+    const canonical = path.join(home, '.agents', 'skills')
+    const originalMode = fs.statSync(canonical).mode
+    t.after(() => fs.chmodSync(canonical, originalMode))
+    fs.chmodSync(canonical, 0o500)
+
+    const failed = runResult(['-g', '-a', 'claude-code', '-c', 'skills', '-y'], { home })
+    assert.notEqual(failed.status, 0)
+    const retained = JSON.parse(fs.readFileSync(path.join(home, '.agent-conventions.json'), 'utf8'))
+    assert.ok(retained.skills.dirs.length > 0)
+    assert.ok(retained.skills.links.length > 0)
+  })
 })
 
 describe('the symlink case, end to end', () => {
@@ -268,7 +331,7 @@ describe('the symlink case, end to end', () => {
     fs.mkdirSync(path.dirname(claudeMd), { recursive: true })
     fs.symlinkSync(source, claudeMd)
 
-    const out = run(['-g', '-a', 'claude-code', '-y'], { home })
+    const out = run(['-g', '-a', 'claude-code', '-y'], { home, expectFail: true })
     assert.match(out, /REFUSED|SKIPPED/, 'the run must report the refusal')
     assert.equal(
       fs.readFileSync(source, 'utf8'), original,
@@ -365,7 +428,7 @@ describe('uninstall', () => {
     fs.writeFileSync(path.join(foreignSkill, 'notes.md'), 'untouched')
     fs.symlinkSync(foreign, canonical)
 
-    run(['uninstall', '-g'], { home })
+    run(['uninstall', '-g'], { home, expectFail: true })
 
     assert.equal(fs.readFileSync(path.join(foreignSkill, 'SKILL.md'), 'utf8'), 'foreign skill')
     assert.equal(fs.readFileSync(path.join(foreignSkill, 'notes.md'), 'utf8'), 'untouched')
@@ -377,13 +440,21 @@ describe('uninstall', () => {
     const agent = path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')
     fs.appendFileSync(agent, '\n# user note\n')
 
-    const update = run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
-    assert.match(update, /REFUSED/)
+    const update = runResult(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    assert.notEqual(update.status, 0)
+    assert.match(update.stderr, /managed file was modified/)
+    assert.match(update.stderr, /Installation incomplete/)
     assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
 
-    run(['uninstall', '-p'], { home, cwd: project })
+    const uninstall = runResult(['uninstall', '-p'], { home, cwd: project })
+    assert.notEqual(uninstall.status, 0)
+    assert.match(uninstall.stderr, /Removal incomplete/)
     assert.ok(fs.existsSync(agent), 'a modified generated agent must survive uninstall')
     assert.match(fs.readFileSync(agent, 'utf8'), /user note/)
+    const receipt = JSON.parse(fs.readFileSync(path.join(project, '.agent-conventions.json'), 'utf8'))
+    assert.ok(receipt.agents.some((entry) => (
+      entry.provider === 'codex' && entry.name === 'conventions-code-reviewer'
+    )))
   })
 
   test('refuses a foreign agent collision and never claims it in the receipt', () => {
@@ -392,8 +463,10 @@ describe('uninstall', () => {
     fs.mkdirSync(path.dirname(agent), { recursive: true })
     fs.writeFileSync(agent, 'foreign')
 
-    const output = run(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
-    assert.match(output, /REFUSED/)
+    const result = runResult(['-p', '-a', 'codex', '-c', 'agents', '-y'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /unowned file exists here/)
+    assert.match(result.stderr, /Installation incomplete/)
     assert.equal(fs.readFileSync(agent, 'utf8'), 'foreign')
 
     run(['uninstall', '-p'], { home, cwd: project })
@@ -450,6 +523,30 @@ describe('argument handling', () => {
     assert.match(out, /unknown component/)
   })
 
+  test('rejects missing option values before writing', () => {
+    const { home, project } = sandbox('missing-option-value')
+    const result = runResult(['-p', '--agent'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /requires a value/)
+    assert.ok(!fs.existsSync(path.join(project, '.agents')))
+  })
+
+  test('rejects unexpected positional arguments before writing', () => {
+    const { home, project } = sandbox('unexpected-positional')
+    const result = runResult(['not-a-command', '-p'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /unexpected argument/)
+    assert.ok(!fs.existsSync(path.join(project, '.agents')))
+  })
+
+  test('rejects a second command token before writing', () => {
+    const { home, project } = sandbox('duplicate-command')
+    const result = runResult(['uninstall', 'install', '-p'], { home, cwd: project })
+    assert.notEqual(result.status, 0)
+    assert.match(result.stderr, /unexpected argument/)
+    assert.ok(!fs.existsSync(path.join(project, '.agents')))
+  })
+
   test('--help exits cleanly', () => {
     const { home } = sandbox('help')
     assert.match(run(['--help'], { home }), /agent-conventions/)
@@ -481,5 +578,46 @@ describe('uninstall does not take content the installer did not add', () => {
     assert.ok(fs.existsSync(codexAgents))
     run(['uninstall', '-g'], { home })
     assert.ok(!fs.existsSync(codexAgents), 'a file containing only our block should not be left empty')
+  })
+
+  test('completes uninstall when receipt-owned paths are already absent', () => {
+    const { home } = sandbox('uninstall-already-absent')
+    run(['-g', '-a', 'codex', '-y'], { home })
+
+    fs.rmSync(path.join(home, '.agents', 'skills'), { recursive: true })
+    fs.rmSync(path.join(home, '.codex', 'agents', 'conventions-code-reviewer.toml'))
+    fs.rmSync(path.join(home, '.codex', 'AGENTS.md'))
+
+    run(['uninstall', '-g'], { home })
+    assert.ok(!fs.existsSync(path.join(home, '.agent-conventions.json')))
+  })
+
+  test('retains only entries that could not be removed after an I/O failure', (t) => {
+    const { home, project } = sandbox('uninstall-io-failure')
+    run(['-p', '-a', 'codex', '-y'], { home, cwd: project })
+
+    const agent = path.join(project, '.codex', 'agents', 'conventions-code-reviewer.toml')
+    const parent = path.dirname(agent)
+    const originalMode = fs.statSync(parent).mode
+    t.after(() => fs.chmodSync(parent, originalMode))
+    const receiptPath = path.join(project, '.agent-conventions.json')
+    fs.chmodSync(receiptPath, 0o400)
+    fs.chmodSync(parent, 0o500)
+
+    const failed = runResult(['uninstall', '-p'], { home, cwd: project })
+    assert.notEqual(failed.status, 0)
+    assert.match(failed.stderr, /Removal incomplete\. Receipt retained:/)
+
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    assert.equal(receipt.skills, null, 'successfully removed skill paths must not remain owned')
+    assert.ok(receipt.agents.length > 0, 'unremovable agents must remain owned')
+    assert.ok(
+      receipt.agents.every((entry) => entry.file.includes('/.codex/agents/')),
+      'the receipt must retain only entries below the unwritable directory',
+    )
+
+    fs.chmodSync(parent, originalMode)
+    run(['uninstall', '-p'], { home, cwd: project })
+    assert.ok(!fs.existsSync(receiptPath), 'a retry must complete after permissions are restored')
   })
 })

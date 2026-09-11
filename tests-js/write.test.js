@@ -19,7 +19,7 @@ import {
   applyInstructionWrite, applyManagedFileWrite, classify, contentDigest, hasBlock,
   installSkill, linkSkill, planInstructionWrite, planManagedFileWrite,
   planSkillLinkDirectory, prepareSkillLinkDirectory, removeBlock,
-  removeManagedFile, renderBlock, upsertBlock,
+  removeManagedFile, renderBlock, upsertBlock, writeReceipt,
 } from '../src/write.js'
 import { MARKER_BEGIN, MARKER_END, parseAgentSelection } from '../src/targets.js'
 
@@ -193,6 +193,20 @@ describe('planning an instruction write', () => {
   })
 })
 
+describe('receipts', () => {
+  test('replaces a read-only receipt when its parent is writable', (t) => {
+    const dir = scratch('read-only-receipt')
+    const receipt = path.join(dir, '.agent-conventions.json')
+    fs.writeFileSync(receipt, '{"version":"old"}\n')
+    t.after(() => fs.chmodSync(receipt, 0o600))
+    fs.chmodSync(receipt, 0o400)
+
+    writeReceipt(receipt, { version: 'new' })
+
+    assert.deepEqual(JSON.parse(fs.readFileSync(receipt, 'utf8')), { version: 'new' })
+  })
+})
+
 describe('skills', () => {
   test('installSkill replaces a previous copy rather than merging into it', () => {
     const dir = scratch('skill-replace')
@@ -207,6 +221,65 @@ describe('skills', () => {
     installSkill(src, dest)
     assert.equal(fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'), 'new')
     assert.ok(!fs.existsSync(path.join(dest, 'STALE.md')), 'stale files must not survive')
+  })
+
+  test('installSkill preserves the previous copy when staging fails', (t) => {
+    const dir = scratch('skill-stage-failure')
+    const src = path.join(dir, 'src', 'demo')
+    fs.mkdirSync(src, { recursive: true })
+    fs.writeFileSync(path.join(src, 'SKILL.md'), 'new')
+
+    const dest = path.join(dir, 'dest', 'demo')
+    fs.mkdirSync(dest, { recursive: true })
+    fs.writeFileSync(path.join(dest, 'SKILL.md'), 'old')
+    fs.writeFileSync(path.join(dest, 'user-note.md'), 'keep')
+
+    const copy = fs.cpSync
+    fs.cpSync = () => { throw new Error('copy failed') }
+    t.after(() => { fs.cpSync = copy })
+    assert.throws(() => installSkill(src, dest))
+    assert.equal(fs.readFileSync(path.join(dest, 'SKILL.md'), 'utf8'), 'old')
+    assert.equal(fs.readFileSync(path.join(dest, 'user-note.md'), 'utf8'), 'keep')
+  })
+
+  test('installSkill preserves the previous copy when promotion rollback fails', (t) => {
+    const dir = scratch('skill-rollback-failure')
+    const src = path.join(dir, 'src', 'demo')
+    fs.mkdirSync(src, { recursive: true })
+    fs.writeFileSync(path.join(src, 'SKILL.md'), 'new')
+
+    const dest = path.join(dir, 'dest', 'demo')
+    fs.mkdirSync(dest, { recursive: true })
+    fs.writeFileSync(path.join(dest, 'SKILL.md'), 'old')
+
+    const rename = fs.renameSync
+    fs.renameSync = (from, to) => {
+      if (to === dest) {
+        fs.mkdirSync(dest)
+        throw new Error('promotion failed')
+      }
+      rename(from, to)
+    }
+    t.after(() => { fs.renameSync = rename })
+
+    let error
+    try {
+      installSkill(src, dest)
+    } catch (err) {
+      error = err
+    }
+    assert.ok(error)
+    assert.match(error.message, /previous copy remains at/)
+    assert.equal(error.destination, dest)
+    assert.match(error.recoveryPath, /\/previous$/)
+
+    const backupParent = fs.readdirSync(path.dirname(dest))
+      .find((name) => name.startsWith('.demo-'))
+    assert.ok(backupParent, 'the staging directory must remain for recovery')
+    assert.equal(
+      fs.readFileSync(path.join(path.dirname(dest), backupParent, 'previous', 'SKILL.md'), 'utf8'),
+      'old',
+    )
   })
 
   describe('generated managed files', () => {

@@ -18,8 +18,8 @@ import { buildPlan, renderDisclosure } from '../src/plan.js'
 import { SELECTABLE_AGENTS, parseAgentSelection } from '../src/targets.js'
 import {
   applyInstructionWrite, applyManagedFileWrite, installSkill, linkSkill,
-  prepareSkillLinkDirectory, readReceipt, removeBlock, removeManagedFile,
-  removeSkillPath, writeReceipt,
+  prepareReceiptWrite, prepareSkillLinkDirectory, readReceipt, removeBlock,
+  removeManagedFile, removeSkillPath, SkillInstallRecoveryError, writeReceipt,
 } from '../src/write.js'
 
 const PACKAGE_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
@@ -53,22 +53,36 @@ function parseArgs(argv) {
     copy: false, replaceSymlinks: false, dryRun: false, yes: false, help: false,
   }
   const rest = [...argv]
+  let commandSeen = false
   while (rest.length) {
     const arg = rest.shift()
+    const optionValue = () => {
+      const value = rest.shift()
+      if (!value || value.startsWith('-')) throw new Error(`${arg} requires a value`)
+      return value
+    }
     switch (arg) {
-      case 'install': opts.command = 'install'; break
-      case 'uninstall': case 'remove': opts.command = 'uninstall'; break
+      case 'install':
+        if (commandSeen) throw new Error(`unexpected argument: ${arg}`)
+        commandSeen = true
+        opts.command = 'install'
+        break
+      case 'uninstall': case 'remove':
+        if (commandSeen) throw new Error(`unexpected argument: ${arg}`)
+        commandSeen = true
+        opts.command = 'uninstall'
+        break
       case '-g': case '--global': opts.scope = 'global'; break
       case '-p': case '--project': opts.scope = 'project'; break
-      case '-a': case '--agent': opts.agents = rest.shift(); break
-      case '-c': case '--components': opts.components = rest.shift(); break
+      case '-a': case '--agent': opts.agents = optionValue(); break
+      case '-c': case '--components': opts.components = optionValue(); break
       case '--copy': opts.copy = true; break
       case '--replace-symlinks': opts.replaceSymlinks = true; break
       case '--dry-run': opts.dryRun = true; break
       case '-y': case '--yes': opts.yes = true; break
       case '-h': case '--help': opts.help = true; break
       default:
-        if (arg.startsWith('-')) throw new Error(`unknown option: ${arg}`)
+        throw new Error(arg.startsWith('-') ? `unknown option: ${arg}` : `unexpected argument: ${arg}`)
     }
   }
   return opts
@@ -213,6 +227,7 @@ async function runInstall(opts) {
     }
   }
 
+  prepareReceiptWrite(plan.receipt)
   const receipt = {
     package: PKG.name, version: PKG.version, installedAt: new Date().toISOString(),
     scope,
@@ -223,8 +238,14 @@ async function runInstall(opts) {
       .filter((entry) => !plan.instructions.some((item) => item.file === entry.file)),
   }
 
+  let incomplete = false
   if (plan.skills) {
     const written = []
+    const retainedStalePaths = { dirs: [], links: [] }
+    const retainedProviderLinks = []
+    const removedStalePaths = new Set()
+    const recoveries = [...(plan.previousReceipt?.skills?.recoveries ?? [])]
+    const recoveryDestinations = new Set(recoveries.map((recovery) => recovery.destination))
     let canonicalPrepared = false
     let canonicalReady = false
     try {
@@ -236,17 +257,39 @@ async function runInstall(opts) {
         console.log(`replaced-symlink   ${plan.skills.canonical}`)
       }
       for (const stale of plan.staleSkillPaths) {
-        const result = removeSkillPath(stale)
-        if (result.removed) console.log(`removed stale      ${stale}`)
-        else console.error(`kept stale         ${stale}: ${result.reason}`)
+        const result = removeSkillPath(stale.file)
+        if (result.removed) {
+          removedStalePaths.add(stale.file)
+          console.log(`removed stale      ${stale.file}`)
+        }
+        else {
+          incomplete = true
+          retainedStalePaths[stale.kind].push(stale.file)
+          console.error(`kept stale         ${stale.file}: ${result.reason}`)
+        }
       }
       for (const skill of plan.skills.sources) {
         const dest = path.join(plan.skills.canonical, skill.name)
+        const recovery = recoveries.find((entry) => entry.destination === dest)
+        if (recovery) {
+          throw new Error(
+            `${dest} has an unrecovered previous copy at ${recovery.recoveryPath}; ` +
+              'recover it manually before installing this skill again.',
+          )
+        }
         installSkill(skill.dir, dest)
         written.push(dest)
       }
       canonicalReady = true
     } catch (err) {
+      incomplete = true
+      if (err instanceof SkillInstallRecoveryError) {
+        recoveryDestinations.add(err.destination)
+        recoveries.push({
+          destination: err.destination,
+          recoveryPath: err.recoveryPath,
+        })
+      }
       console.error(
         `SKIPPED skills     ${plan.skills.canonical}\n                   ${err.message}`,
       )
@@ -267,11 +310,34 @@ async function runInstall(opts) {
           links.push(linkPath)
         }
       } catch (err) {
+        incomplete = true
+        retainedProviderLinks.push(
+          ...(plan.previousReceipt?.skills?.links ?? [])
+            .filter((file) => path.dirname(file) === link.dir),
+        )
         console.error(`SKIPPED            ${link.dir}\n                   ${err.message}`)
       }
     }
-    receipt.skills = canonicalPrepared
-      ? { canonical: plan.skills.canonical, dirs: written, links }
+    const retainedPreviousPaths = (kind) => (
+      plan.previousReceipt?.skills?.[kind]?.filter((file) => (
+        !removedStalePaths.has(file) && !recoveryDestinations.has(file)
+      )) ?? []
+    )
+    const withRecoveries = (skills) => (
+      recoveries.length ? { ...skills, recoveries } : skills
+    )
+    receipt.skills = canonicalReady
+      ? withRecoveries({
+          canonical: plan.skills.canonical,
+          dirs: [...written, ...retainedStalePaths.dirs],
+          links: [...new Set([...links, ...retainedStalePaths.links, ...retainedProviderLinks])],
+        })
+      : canonicalPrepared
+        ? withRecoveries({
+            canonical: plan.skills.canonical,
+            dirs: [...new Set([...retainedPreviousPaths('dirs'), ...written])],
+            links: retainedPreviousPaths('links'),
+          })
       : (plan.previousReceipt?.skills ?? null)
     receipt.mode = mode
     if (written.length) {
@@ -293,6 +359,7 @@ async function runInstall(opts) {
         console.log(`replaced-symlink   ${target.dir}`)
       }
     } catch (err) {
+      incomplete = true
       receipt.agents.push(
         ...(plan.previousReceipt?.agents ?? [])
           .filter((entry) => entry.provider === target.agent),
@@ -302,12 +369,19 @@ async function runInstall(opts) {
     }
 
     for (const item of plan.staleAgents.filter((entry) => entry.provider === target.agent)) {
-      const result = removeManagedFile(item)
-      if (result.removed) {
-        console.log(`removed stale      ${item.file}`)
-      } else if (result.reason !== 'already absent') {
+      try {
+        const result = removeManagedFile(item)
+        if (result.removed) {
+          console.log(`removed stale      ${item.file}`)
+        } else if (result.reason !== 'already absent') {
+          incomplete = true
+          receipt.agents.push(item)
+          console.error(`kept stale         ${item.file}: ${result.reason}`)
+        }
+      } catch (err) {
+        incomplete = true
         receipt.agents.push(item)
-        console.error(`kept stale         ${item.file}: ${result.reason}`)
+        console.error(`kept stale         ${item.file}: ${err.message}`)
       }
     }
 
@@ -322,6 +396,7 @@ async function runInstall(opts) {
         })
         console.log(`${applied.applied.padEnd(18)} ${item.file}`)
       } catch (err) {
+        incomplete = true
         if (item.owned) receipt.agents.push(item.owned)
         console.error(`SKIPPED            ${item.file}\n                   ${err.message}`)
       }
@@ -336,6 +411,7 @@ async function runInstall(opts) {
         receipt.instructions.push({ file: applied.file, applied: applied.applied })
         console.log(`${applied.applied.padEnd(18)} ${applied.file}`)
       } catch (err) {
+        incomplete = true
         console.error(`SKIPPED            ${item.file}\n                   ${err.message}`)
         const previous = plan.previousReceipt?.instructions?.find((entry) => entry.file === item.file)
         if (previous) receipt.instructions.push(previous)
@@ -350,6 +426,10 @@ async function runInstall(opts) {
   const flag = scope === 'global' ? '-g' : '-p'
   console.log(`Undo:    npx ${PKG.name} uninstall ${flag}`)
   console.log(`         npx github:aanyberg/agent-conventions uninstall ${flag}`)
+  if (incomplete) {
+    console.error('Installation incomplete; resolve the reported paths and rerun the command.')
+    return 1
+  }
   return 0
 }
 
@@ -363,16 +443,58 @@ async function runUninstall(opts) {
     console.error(`No receipt at ${file} — nothing recorded as installed at ${scope} scope.`)
     return 1
   }
+  prepareReceiptWrite(file)
+
+  const remaining = {
+    ...receipt,
+    skills: receipt.skills ? { ...receipt.skills, dirs: [], links: [] } : null,
+    agents: [],
+    instructions: [],
+  }
+  let incomplete = false
+  for (const recovery of receipt.skills?.recoveries ?? []) {
+    incomplete = true
+    console.error(
+      `kept recovery ${recovery.recoveryPath}: recover it manually before removing ${recovery.destination}`,
+    )
+  }
 
   // Only ever remove what the receipt records. Never infer.
-  for (const file of [...(receipt.skills?.links ?? []), ...(receipt.skills?.dirs ?? [])]) {
-    const result = removeSkillPath(file)
-    if (!result.removed) console.error(`kept     ${file}: ${result.reason}`)
+  const removeSkill = (file, kind) => {
+    try {
+      const result = removeSkillPath(file)
+      if (result.removed) {
+        console.log(`removed  ${file}`)
+        return
+      }
+      incomplete = true
+      remaining.skills[kind].push(file)
+      console.error(`kept     ${file}: ${result.reason}`)
+    } catch (err) {
+      incomplete = true
+      remaining.skills[kind].push(file)
+      console.error(`kept     ${file}: ${err.message}`)
+    }
+  }
+  for (const file of receipt.skills?.links ?? []) removeSkill(file, 'links')
+  for (const file of receipt.skills?.dirs ?? []) {
+    removeSkill(file, 'dirs')
   }
   for (const entry of receipt.agents ?? []) {
-    const result = removeManagedFile(entry)
-    if (result.removed) console.log(`removed  ${entry.file}`)
-    else console.error(`kept     ${entry.file}: ${result.reason}`)
+    try {
+      const result = removeManagedFile(entry)
+      if (result.removed || result.reason === 'already absent') {
+        console.log(`removed  ${entry.file}`)
+        continue
+      }
+      incomplete = true
+      remaining.agents.push(entry)
+      console.error(`kept     ${entry.file}: ${result.reason}`)
+    } catch (err) {
+      incomplete = true
+      remaining.agents.push(entry)
+      console.error(`kept     ${entry.file}: ${err.message}`)
+    }
   }
   for (const item of receipt.instructions ?? []) {
     try {
@@ -390,8 +512,27 @@ async function runUninstall(opts) {
         console.log(`stripped ${item.file} (kept your content)`)
       }
     } catch (err) {
+      if (err.code === 'ENOENT') {
+        console.log(`removed  ${item.file}`)
+        continue
+      }
+      incomplete = true
+      remaining.instructions.push(item)
       console.error(`skipped  ${item.file}: ${err.message}`)
     }
+  }
+  if (
+    remaining.skills &&
+    !remaining.skills.dirs.length &&
+    !remaining.skills.links.length &&
+    !remaining.skills.recoveries?.length
+  ) {
+    remaining.skills = null
+  }
+  if (incomplete) {
+    writeReceipt(file, remaining)
+    console.error(`\nRemoval incomplete. Receipt retained: ${file}`)
+    return 1
   }
   fs.rmSync(file, { force: true })
   console.log(`\nRemoved. Receipt deleted: ${file}`)

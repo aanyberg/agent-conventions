@@ -72,9 +72,9 @@ export function buildPlan({
       ...links.flatMap((link) => skills.map((skill) => path.join(link.dir, skill.name))),
     ])
     plan.staleSkillPaths = [
-      ...(previousReceipt?.skills?.dirs ?? []),
-      ...(previousReceipt?.skills?.links ?? []),
-    ].filter((file) => !desiredSkillPaths.has(file))
+      ...(previousReceipt?.skills?.dirs ?? []).map((file) => ({ file, kind: 'dirs' })),
+      ...(previousReceipt?.skills?.links ?? []).map((file) => ({ file, kind: 'links' })),
+    ].filter(({ file }) => !desiredSkillPaths.has(file))
   }
 
   if (components.includes('agents')) {
@@ -183,7 +183,7 @@ export function renderDisclosure(plan, { packageVersion }) {
 
   if (plan.staleSkillPaths.length) {
     lines.push('  stale managed skill paths removed during update:')
-    for (const file of plan.staleSkillPaths) lines.push(`      remove    ${file}`)
+    for (const { file } of plan.staleSkillPaths) lines.push(`      remove    ${file}`)
     lines.push('')
   }
 

@@ -264,6 +264,7 @@ export function removeSkillPath(file) {
       reason: `parent is a symlink → ${at.resolved}; refusing to remove through it`,
     }
   }
+  if (at.kind === 'absent') return { file, removed: true }
   if (at.kind !== 'directory') {
     return { file, removed: false, reason: `parent is ${at.kind}` }
   }
@@ -272,6 +273,19 @@ export function removeSkillPath(file) {
 }
 
 /** Copy a skill directory, replacing any previous copy of the same skill. */
+export class SkillInstallRecoveryError extends Error {
+  constructor(destination, recoveryPath, cause) {
+    super(
+      `Failed to install skill at ${destination}; previous copy remains at ${recoveryPath}. ` +
+        'Resolve the conflicting destination before recovering it.',
+      { cause },
+    )
+    this.name = 'SkillInstallRecoveryError'
+    this.destination = destination
+    this.recoveryPath = recoveryPath
+  }
+}
+
 export function installSkill(sourceDir, destDir) {
   const parent = path.dirname(destDir)
   const at = classify(parent)
@@ -279,9 +293,34 @@ export function installSkill(sourceDir, destDir) {
     throw new Error(`${parent} is a symlink → ${at.resolved}; refusing to write through it`)
   }
   if (at.kind === 'file') throw new Error(`${parent} is a file; expected a directory`)
-  fs.rmSync(destDir, { recursive: true, force: true })
   fs.mkdirSync(parent, { recursive: true })
-  fs.cpSync(sourceDir, destDir, { recursive: true })
+  const stagingParent = fs.mkdtempSync(path.join(parent, `.${path.basename(destDir)}-`))
+  const staged = path.join(stagingParent, path.basename(destDir))
+  const previous = path.join(stagingParent, 'previous')
+  let movedPrevious = false
+  let preserveRecoveryCopy = false
+  try {
+    fs.cpSync(sourceDir, staged, { recursive: true })
+    if (classify(destDir).kind !== 'absent') {
+      fs.renameSync(destDir, previous)
+      movedPrevious = true
+    }
+    try {
+      fs.renameSync(staged, destDir)
+    } catch (err) {
+      if (movedPrevious) {
+        try {
+          fs.renameSync(previous, destDir)
+        } catch (rollbackErr) {
+          preserveRecoveryCopy = true
+          throw new SkillInstallRecoveryError(destDir, previous, rollbackErr)
+        }
+      }
+      throw err
+    }
+  } finally {
+    if (!preserveRecoveryCopy) fs.rmSync(stagingParent, { recursive: true, force: true })
+  }
 }
 
 /**
@@ -324,7 +363,21 @@ export function readReceipt(file) {
   }
 }
 
+export function prepareReceiptWrite(file) {
+  const parent = path.dirname(file)
+  fs.mkdirSync(parent, { recursive: true })
+  fs.accessSync(parent, fs.constants.W_OK)
+}
+
 export function writeReceipt(file, receipt) {
-  fs.mkdirSync(path.dirname(file), { recursive: true })
-  fs.writeFileSync(file, JSON.stringify(receipt, null, 2) + '\n', 'utf8')
+  const parent = path.dirname(file)
+  prepareReceiptWrite(file)
+  const stagingParent = fs.mkdtempSync(path.join(parent, `.${path.basename(file)}-`))
+  const staged = path.join(stagingParent, path.basename(file))
+  try {
+    fs.writeFileSync(staged, JSON.stringify(receipt, null, 2) + '\n', 'utf8')
+    fs.renameSync(staged, file)
+  } finally {
+    fs.rmSync(stagingParent, { recursive: true, force: true })
+  }
 }

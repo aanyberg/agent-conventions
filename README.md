@@ -38,7 +38,7 @@ It writes a receipt, so `uninstall` removes exactly what was installed and nothi
 npx github:aanyberg/agent-conventions uninstall -g
 ```
 
-**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path or `.claude/skills/` is already a **symlink**, the installer refuses it rather than writing through the link. Other selected providers still install, and the receipt records only successful writes. `--replace-symlinks` converts the link itself to a real path, leaving its target untouched.
+**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path, skills root, or generated-agent directory is itself a **symlink**, the installer refuses it rather than writing through the link. Other selected providers still install, and the receipt records only successful writes. `--replace-symlinks` converts the link itself to a real path, leaving its target untouched.
 
 Your project's own `AGENTS.md` is never written. That file is yours.
 
@@ -125,30 +125,19 @@ A consumer repo can commit the marketplace in `.claude/settings.json` so contrib
 
 ### Global Instructions
 
-`AGENTS.md` is the single source of truth. The filename is the portable part — 30+ tools read a project's `AGENTS.md` directly — but *global* instructions are a different matter: each tool looks in its own config directory, and two of them expect a different filename there. So every tool below needs a link, and what portability buys you is one file to edit rather than three to keep in sync.
+`AGENTS.md` is the single source of truth. Global instructions use
+provider-specific filenames, so install the managed block with the package
+installer rather than creating symlinks:
 
-> **This step is manual for now.** The symlinks below are the current method; they are being replaced by an installer that appends a marked block instead, so an existing file is never clobbered. Until then, note that a symlink means edits to the target write back into this repository.
-
-Symlink `AGENTS.md` to each tool's expected config path:
-
-**Claude Code**
 ```bash
-ln -s /path/to/agent-conventions/AGENTS.md ~/.claude/CLAUDE.md
+npx github:aanyberg/agent-conventions -g -c instructions
 ```
 
-**GitHub Copilot**
-```bash
-mkdir -p ~/.copilot
-ln -s /path/to/agent-conventions/AGENTS.md ~/.copilot/copilot-instructions.md
-```
-
-**OpenAI Codex CLI**
-```bash
-mkdir -p ~/.codex
-ln -s /path/to/agent-conventions/AGENTS.md ~/.codex/AGENTS.md
-```
-
-Replace `/path/to/agent-conventions` with the absolute path to your local clone, e.g. `/home/<username>/projects/agent-conventions`.
+The installer appends a marked block to the selected instruction files and
+preserves content outside that block. It refuses instruction-file symlinks
+unless `--replace-symlinks` is explicitly provided; replacement affects only
+the symlink itself, never its target. Use `uninstall -g` to remove only the
+managed block later.
 
 ## Removing
 
@@ -224,7 +213,14 @@ git commit -am "chore: release 1.1.0"
 git tag 1.1.0 && git push origin 1.1.0
 ```
 
-The bare semantic-version tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs the full suite rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a publish cannot assume the PR was green. It also verifies the complete tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it publish.
+The bare semantic-version tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs the full suite rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a staged release cannot assume the PR was green. It also verifies the complete tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it stage the package for approval.
+
+Approve the staged package once its checks complete:
+
+```bash
+npm stage list @anyberg/agent-conventions
+npm stage approve <stage-id>
+```
 
 Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) over OIDC: no `NPM_TOKEN` is stored anywhere, the credential is short-lived and scoped to this one workflow, and npm attaches a provenance attestation automatically.
 

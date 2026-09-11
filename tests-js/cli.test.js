@@ -189,6 +189,70 @@ describe('global scope', () => {
     assert.ok(!fs.existsSync(path.join(foreign, 'git-conventions')))
   })
 
+  test('refuses to write generated agents through a provider-directory symlink', () => {
+    const { home } = sandbox('global-agent-directory-symlink')
+    const foreign = path.join(home, 'foreign-agents')
+    fs.mkdirSync(foreign)
+    fs.writeFileSync(path.join(foreign, 'keep.txt'), 'untouched')
+    const claudeAgents = path.join(home, '.claude', 'agents')
+    fs.mkdirSync(path.dirname(claudeAgents), { recursive: true })
+    fs.symlinkSync(foreign, claudeAgents)
+
+    const output = run(['-g', '-a', 'claude-code', '-c', 'agents', '-y'], {
+      home, expectFail: true,
+    })
+
+    assert.match(output, /REFUSED without --replace-symlinks/)
+    assert.ok(fs.lstatSync(claudeAgents).isSymbolicLink())
+    assert.deepEqual(fs.readdirSync(foreign), ['keep.txt'])
+  })
+
+  test('preserves agent receipts and stale files when a provider-directory symlink is refused', () => {
+    const { home } = sandbox('global-agent-directory-receipt')
+    run(['-g', '-a', 'claude-code', '-c', 'agents', '-y'], { home })
+    const receiptPath = path.join(home, '.agent-conventions.json')
+    const receipt = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    const claudeAgents = path.join(home, '.claude', 'agents')
+    const foreign = path.join(home, 'foreign-agents')
+    fs.renameSync(claudeAgents, foreign)
+    fs.symlinkSync(foreign, claudeAgents)
+    const stale = path.join(claudeAgents, 'conventions-retired.md')
+    const content = 'retired'
+    fs.writeFileSync(stale, content)
+    receipt.agents.push({
+      provider: 'claude-code',
+      name: 'conventions-retired',
+      file: stale,
+      sha256: crypto.createHash('sha256').update(content).digest('hex'),
+    })
+    fs.writeFileSync(receiptPath, JSON.stringify(receipt, null, 2) + '\n')
+
+    const output = run(['-g', '-a', 'claude-code', '-c', 'agents', '-y'], {
+      home, expectFail: true,
+    })
+
+    assert.doesNotMatch(output, /remove\s+.*conventions-retired\.md/)
+    assert.ok(fs.existsSync(path.join(foreign, 'conventions-retired.md')))
+    const updated = JSON.parse(fs.readFileSync(receiptPath, 'utf8'))
+    assert.equal(updated.agents.filter((entry) => entry.provider === 'claude-code').length, 7)
+  })
+
+  test('--replace-symlinks converts an agent directory without touching its target', () => {
+    const { home } = sandbox('global-replace-agent-directory')
+    const foreign = path.join(home, 'foreign-agents')
+    fs.mkdirSync(foreign)
+    fs.writeFileSync(path.join(foreign, 'keep.txt'), 'untouched')
+    const claudeAgents = path.join(home, '.claude', 'agents')
+    fs.mkdirSync(path.dirname(claudeAgents), { recursive: true })
+    fs.symlinkSync(foreign, claudeAgents)
+
+    run(['-g', '-a', 'claude-code', '-c', 'agents', '--replace-symlinks', '-y'], { home })
+
+    assert.equal(fs.lstatSync(claudeAgents).isSymbolicLink(), false)
+    assert.ok(fs.existsSync(path.join(claudeAgents, 'conventions-code-reviewer.md')))
+    assert.deepEqual(fs.readdirSync(foreign), ['keep.txt'])
+  })
+
   test('skips a Claude skills file collision while installing other components', () => {
     const { home } = sandbox('global-skills-file')
     const claudeSkills = path.join(home, '.claude', 'skills')
@@ -366,6 +430,24 @@ describe('dry run and disclosure', () => {
     assert.ok(!fs.existsSync(path.join(project, '.agents')), 'dry run must not create anything')
   })
 
+  test('--dry-run describes an allowed agent-directory symlink replacement', () => {
+    const { home } = sandbox('dry-run-replace-agent-directory')
+    const foreign = path.join(home, 'foreign-agents')
+    const claudeAgents = path.join(home, '.claude', 'agents')
+    fs.mkdirSync(foreign, { recursive: true })
+    fs.mkdirSync(path.dirname(claudeAgents), { recursive: true })
+    fs.symlinkSync(foreign, claudeAgents)
+
+    const output = run([
+      '-g', '-a', 'claude-code', '-c', 'agents', '--replace-symlinks', '--dry-run',
+    ], { home })
+
+    assert.match(output, /replace\s+.*\.claude[/\\]agents/)
+    assert.match(output, /create\s+.*conventions-code-reviewer\.md/)
+    assert.doesNotMatch(output, /REFUSED without --replace-symlinks/)
+    assert.ok(fs.lstatSync(claudeAgents).isSymbolicLink(), 'dry run must leave the link unchanged')
+  })
+
   test('the disclosure names the receipt and the undo command', () => {
     const { home, project } = sandbox('disclosure')
     const out = run(['-p', '-a', 'all', '-y'], { home, cwd: project })
@@ -455,6 +537,23 @@ describe('uninstall', () => {
     assert.ok(receipt.agents.some((entry) => (
       entry.provider === 'codex' && entry.name === 'conventions-code-reviewer'
     )))
+  })
+
+  test('does not remove generated agents through a provider-directory symlink', () => {
+    const { home } = sandbox('uninstall-agent-directory-symlink')
+    run(['-g', '-a', 'claude-code', '-c', 'agents', '-y'], { home })
+    const claudeAgents = path.join(home, '.claude', 'agents')
+    const foreign = path.join(home, 'foreign-agents')
+    fs.renameSync(claudeAgents, foreign)
+    fs.symlinkSync(foreign, claudeAgents)
+
+    const output = run(['uninstall', '-g'], { home, expectFail: true })
+
+    assert.match(output, /Removal incomplete/)
+    assert.ok(
+      fs.existsSync(path.join(foreign, 'conventions-code-reviewer.md')),
+      'uninstall must not remove files through a symlinked provider directory',
+    )
   })
 
   test('refuses a foreign agent collision and never claims it in the receipt', () => {

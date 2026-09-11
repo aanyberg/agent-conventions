@@ -39,9 +39,9 @@ Options
   -c, --components <list> skills,agents,instructions  (default: all at global
                           scope, skills and agents at project scope)
       --copy              copy instead of symlinking
-      --replace-symlinks  replace an existing instruction or Claude skills
-                          symlink with a real path. Without this, a symlink is
-                          refused rather than written through.
+      --replace-symlinks  replace an existing instruction, skills, or agent
+                          directory symlink with a real path. Without this,
+                          a symlink is refused rather than written through.
       --dry-run           print the plan and exit without writing
   -y, --yes               skip the confirmation prompt (the plan is still printed)
   -h, --help
@@ -196,7 +196,16 @@ async function runInstall(opts) {
   const unknownComponents = components.filter((component) => !['skills', 'agents', 'instructions'].includes(component))
   if (unknownComponents.length) throw new Error(`unknown component(s): ${unknownComponents.join(', ')}`)
 
-  const plan = buildPlan({ packageRoot: PACKAGE_ROOT, scope, components, agents, home, cwd, copy: opts.copy })
+  const plan = buildPlan({
+    packageRoot: PACKAGE_ROOT,
+    scope,
+    components,
+    agents,
+    home,
+    cwd,
+    copy: opts.copy,
+    replaceSymlinks: opts.replaceSymlinks,
+  })
 
   console.log('\n' + renderDisclosure(plan, { packageVersion: PKG.version }) + '\n')
   if (opts.dryRun) {
@@ -341,24 +350,41 @@ async function runInstall(opts) {
   receipt.agents = (plan.previousReceipt?.agents ?? [])
     .filter((entry) => !selectedAgentProviders.has(entry.provider))
 
-  for (const item of plan.staleAgents) {
+  for (const target of plan.agents) {
     try {
-      const result = removeManagedFile(item)
-      if (result.removed) {
-        console.log(`removed stale      ${item.file}`)
-      } else if (result.reason !== 'already absent') {
-        incomplete = true
-        receipt.agents.push(item)
-        console.error(`kept stale         ${item.file}: ${result.reason}`)
+      const prepared = prepareSkillLinkDirectory(target.directoryPlan, {
+        replaceSymlinks: opts.replaceSymlinks,
+      })
+      if (prepared.applied === 'replaced-symlink') {
+        console.log(`replaced-symlink   ${target.dir}`)
       }
     } catch (err) {
       incomplete = true
-      receipt.agents.push(item)
-      console.error(`kept stale         ${item.file}: ${err.message}`)
+      receipt.agents.push(
+        ...(plan.previousReceipt?.agents ?? [])
+          .filter((entry) => entry.provider === target.agent),
+      )
+      console.error(`SKIPPED agents     ${target.dir}\n                   ${err.message}`)
+      continue
     }
-  }
 
-  for (const target of plan.agents) {
+    for (const item of plan.staleAgents.filter((entry) => entry.provider === target.agent)) {
+      try {
+        const result = removeManagedFile(item)
+        if (result.removed) {
+          console.log(`removed stale      ${item.file}`)
+        } else if (result.reason !== 'already absent') {
+          incomplete = true
+          receipt.agents.push(item)
+          console.error(`kept stale         ${item.file}: ${result.reason}`)
+        }
+      } catch (err) {
+        incomplete = true
+        receipt.agents.push(item)
+        console.error(`kept stale         ${item.file}: ${err.message}`)
+      }
+    }
+
     for (const item of target.files) {
       try {
         const applied = applyManagedFileWrite(item, item.content)

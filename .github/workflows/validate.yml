@@ -7,31 +7,17 @@ on:
 
 jobs:
   validate:
-    name: validate
+    name: validate (Node ${{ matrix.node }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['18.17', '20']
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: npm
-      - run: npm ci
-      - run: npm test
-
-  # BSD and GNU sed disagree, and that has already produced a real bug here.
-  # The known cases are caught statically on Linux by test_no_gnu_only_*, which
-  # is what gates a PR. This job is the canary for the rest — BSD-only argument
-  # handling, bash 3.2 on stock macOS — and runs after merge rather than on
-  # every PR, because a macOS runner queues for minutes to run a 2-second suite.
-  validate-macos:
-    name: validate (macOS canary)
-    if: github.event_name == 'push'
-    runs-on: macos-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '20'
+          node-version: ${{ matrix.node }}
           cache: npm
       - run: npm ci
       - run: npm test

@@ -213,7 +213,14 @@ git commit -am "chore: release 1.1.0"
 git tag 1.1.0 && git push origin 1.1.0
 ```
 
-The bare semantic-version tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs the full suite rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a publish cannot assume the PR was green. It also verifies the complete tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it publish.
+The bare semantic-version tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs the full suite rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a staged release cannot assume the PR was green. It also verifies the complete tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it stage the package for approval.
+
+Approve the staged package once its checks complete:
+
+```bash
+npm stage list @anyberg/agent-conventions
+npm stage approve <stage-id>
+```
 
 Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) over OIDC: no `NPM_TOKEN` is stored anywhere, the credential is short-lived and scoped to this one workflow, and npm attaches a provenance attestation automatically.
 

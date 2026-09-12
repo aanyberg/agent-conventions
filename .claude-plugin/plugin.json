@@ -2,7 +2,7 @@
   "name": "conventions",
   "displayName": "Conventions",
   "description": "Skills and agents for backlog management, git conventions, code standards, and planning workflows.",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "author": {
     "name": "Alexander Nyberg"
   }

@@ -1,5 +1,13 @@
 .DS_Store
-.cache/
 node_modules/
 *.tgz
 .planning/
+.venv/
+
+# Installer output when this repo is used as its own install target.
+.claude/
+.codex/
+.cursor/
+.gemini/
+.opencode/
+.github/agents/

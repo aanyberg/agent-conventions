@@ -153,6 +153,16 @@ const NOT_A_REFERENCE = new Set([
 ])
 
 describe('cross-references', () => {
+  test('markdown discovery covers tracked files only', () => {
+    const discovered = markdownFiles().map(relative)
+    const untracked = discovered.filter(
+      (file) => file.startsWith('.') || file.includes('node_modules/'),
+    )
+    assert.deepEqual(untracked, [])
+    assert.ok(discovered.includes('README.md'))
+    assert.ok(discovered.includes('skills/backlog-management/SKILL.md'))
+  })
+
   for (const file of markdownFiles()) {
     test(`${relative(file)} has no broken relative links`, () => {
       const broken = [...fs.readFileSync(file, 'utf8').matchAll(LINK)]

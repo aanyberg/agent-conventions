@@ -273,6 +273,8 @@ npm test
 It needs no API access or GitHub auth — `gh` is stubbed.
 `.github/workflows/validate.yml` gates every pull request on Linux, and repeats the
 suite on macOS after merge to `main` as a canary.
+Supported runtimes and the per-provider agent-file contracts are documented in
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 What it checks:
 

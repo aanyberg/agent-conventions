@@ -18,7 +18,10 @@ description: Python design patterns including KISS, Separation of Concerns, Sing
 
 - **KISS** — Choose the simplest solution that works. A plain dict beats a factory registry. Complexity must earn its place.
 - **Single Responsibility (SRP)** — Each unit has one reason to change. HTTP parsing, business rules, and data access belong in separate classes.
-- **Separation of Concerns** — Layer as: API handler → Service → Repository. Each layer depends only on layers below it; services must never import from handlers.
+- **Separation of Concerns** — Separate transport, business rules, and data
+  access when the component needs those concerns, while preserving the
+  repository's existing boundaries. Do not introduce three layers for a
+  simple component.
 - **Composition Over Inheritance** — Build behavior by combining objects, not extending classes. Use constructor injection with Protocols.
 - **Rule of Three** — Wait until you have three instances before abstracting. Duplication is often better than the wrong abstraction.
 - **Function Size** — Functions over 20–50 lines likely serve multiple purposes. Extract when nesting exceeds 3 levels.

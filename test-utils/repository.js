@@ -63,10 +63,6 @@ export function markdownFiles() {
   return walk(ROOT, (file) => file.endsWith('.md'))
 }
 
-export function shellScripts() {
-  return walk(path.join(ROOT, 'skills'), (file) => file.endsWith('.sh'))
-}
-
 export function readJson(rel) {
   return JSON.parse(fs.readFileSync(path.join(ROOT, rel), 'utf8'))
 }

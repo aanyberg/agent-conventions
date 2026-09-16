@@ -32,4 +32,6 @@ Skip: trivial getters/setters, framework code, one-off scripts.
 
 Produce a test plan with: what to test, test type for each area, coverage targets, and example test cases. Identify gaps in existing coverage.
 
-Drive each item in the plan through the **test-driven-development** skill's Red-Green-Refactor loop — the plan decides *what* to test; TDD governs *how* each test gets written.
+When the repository or user has selected TDD, drive each item through the
+**test-driven-development** skill's Red-Green-Refactor loop. Otherwise use the
+repository's normal implementation and testing sequence.

@@ -42,7 +42,6 @@
     "node": ">=18.17"
   },
   "scripts": {
-    "pretest": "node scripts/ensure-shellcheck.mjs",
     "test": "node --test tests-js/"
   },
   "devDependencies": {

@@ -18,17 +18,19 @@ Uses constructive, collaborative phrasing ("Have you considered ...?") with prac
 
 ## Reviewer independence
 
-When invoked as the independent reviewer, the reviewer receives only: the diff, the backlog item (goal and acceptance criteria), and the tests. It does not receive the author's reasoning, plan, or log. It runs in a fresh context or as a separate subagent. The author never approves their own PR.
+When invoked as the independent reviewer, the reviewer receives only the diff,
+the work item's goal and acceptance criteria when one exists, and the tests. It
+does not receive the author's reasoning, plan, or log. It runs in a fresh
+context or as a separate subagent. The author never approves their own PR.
 
 ## Workflow
 
 ### 1) Collect changed files
 
-```bash
-git fetch origin
-base=$(git merge-base HEAD origin/main)
-git diff --name-only "$base"...HEAD
-```
+Use the pull request's known base when available. Otherwise inspect repository
+metadata for the default branch rather than assuming `origin/main`. For
+uncommitted work, include staged and unstaged changes. Fetch only when remote
+comparison is necessary and allowed.
 
 Group by language from extension: `.py` → python-coding-guidelines; `.ts .tsx .js .jsx` → typescript-coding-guidelines; `.rs` → rust-coding-guidelines. Load each applicable guideline skill plus **code-standards**. Files with no matching guideline (SQL, YAML, shell, Terraform) are reviewed against the universal checks only. If no reviewable files changed, report that and stop.
 
@@ -41,7 +43,9 @@ Universal checks, every language:
 3. **Tests**: business logic and complex behaviour tested; critical paths, edge cases, regressions covered; no test deleted or skipped without justification; no exhaustive tests demanded for trivial wrappers.
 4. **Design**: KISS, cohesion, dependency direction, interface clarity, split overly complex units.
 5. **Scope**: diff matches the acceptance criteria, no unrelated changes, no drive-by refactors outside task scope.
-6. **Docs**: `CHANGELOG.md` and `.planning/architecture.md` updated when behaviour or structure changed.
+6. **Docs**: repository documentation is updated when behaviour or structure
+   changed. Require a changelog or architecture record only when the
+   repository's existing conventions require one.
 
 Language-specific checks:
 
@@ -53,14 +57,16 @@ Language-specific checks:
 **TypeScript / JavaScript**
 - `strict` respected; `unknown` over `any`; `as` only with documented safety reasoning; `@ts-expect-error` only with a comment
 - Discriminated unions and `never` exhaustiveness on sum types
-- Runtime validation (zod or equivalent) at every external boundary: request bodies, env, third-party responses
+- Runtime validation through the project's existing validation approach at
+  external boundaries: request bodies, environment, and third-party responses
 - Async errors handled; no swallowed `.catch`; domain error classes with `cause`
 - Named exports, import order, no circular imports
 - Changed behaviour has a unit test or a Playwright test; stubs preferred over full module mocks
 - Frontend: accessible markup (labels, roles, keyboard), no layout done with `any`-typed props
 
 **Rust**
-- Per rust-coding-guidelines: ownership clarity, error types with `thiserror` or equivalent, no `unwrap` in library paths, clippy clean
+- Per rust-coding-guidelines: ownership clarity, structured error types using
+  existing project dependencies, no `unwrap` in library paths, clippy clean
 
 ### 3) Prioritise findings
 
@@ -84,7 +90,8 @@ Every significant finding: why it matters, concrete improvement, optional code s
 4. **Refactor opportunities**: KISS simplifications, separation of concerns, idiomatic upgrades.
 5. **Acceptance criteria check** (independent reviewer only): each criterion with met / not met / cannot verify.
 
-`needs-human` is mandatory when the diff touches a `policy.autonomous.require_human_review_if_touches` path, adds a dependency, or changes a public API or schema.
+`needs-human` is mandatory when the diff adds a dependency, changes a public
+API or schema, or touches a repository-designated protected path.
 
 ## Quality checks before finishing
 

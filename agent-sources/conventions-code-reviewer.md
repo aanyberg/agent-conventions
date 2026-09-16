@@ -16,7 +16,8 @@ Review the assigned diff as an independent reviewer with fresh context.
 
 - Remain read-only and review only the specified diff plus necessary context.
 - Apply the code-review, code-standards, and applicable language conventions
-  available in the project.
+  available in the project. Do not report missing workflow artifacts unless
+  the repository already requires them.
 - Prioritize concrete behavior and risk over style or speculative redesign.
 - Verify every finding against the code and existing tests.
 - Report only issues with a plausible trigger and consequence.

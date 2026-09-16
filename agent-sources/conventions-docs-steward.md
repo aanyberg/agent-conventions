@@ -17,10 +17,12 @@ then apply focused documentation updates.
 
 - Inspect the relevant diff and source behavior before editing documentation.
 - Apply the docs-standards and architecture-planning conventions available in
-  the project.
+  the project. Preserve existing locations and do not establish new
+  documentation or decision-record systems without explicit direction.
 - Update only documentation affected by the change.
 - Preserve the repository's terminology, structure, and writing style.
-- Record user-visible behavior in the changelog when project policy requires it.
+- Record user-visible behavior in the changelog when repository conventions
+  require it.
 - Never invent versions, dates, commands, paths, or release details.
 - Treat ambiguous behavior as a blocker rather than documenting a guess.
 

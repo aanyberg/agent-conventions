@@ -18,6 +18,11 @@ Enforces consistent code quality and architectural boundaries.
 
 Load language skills based on the files being changed. Each language skill carries only **language-specific** idioms, type-system usage, and tooling; the **Universal Code Rules** below apply to every language.
 
+Repository instructions, manifests, formatter/linter configuration, and
+established local patterns take precedence over optional-tool recommendations
+in these skills. Do not add a dependency or replace project tooling solely to
+conform to an example.
+
 - **Python** (`.py`, `pyproject.toml`, `requirements.txt`): load `python-best-practices` + `python-coding-guidelines`; also load `python-design-patterns` when designing or refactoring component structure
 - **TypeScript / JavaScript** (`.ts`, `.tsx`, `.js`, `.jsx`): load `typescript-coding-guidelines`
 - **Rust** (`.rs`, `Cargo.toml`): load `rust-best-practices` + `rust-coding-guidelines`; also load `rust-design-patterns` when designing or refactoring component structure
@@ -26,9 +31,12 @@ Load language skills based on the files being changed. Each language skill carri
   and build entrypoints rather than assuming a package manager or task runner
 
 ### Semantic Versioning
-- **Source of truth:** `pyproject.toml` (Python) or `package.json` (Node.js/TypeScript)
-- Format: `MAJOR.MINOR.PATCH` (e.g., `1.2.3`)
-- Bump version when cutting a release alongside a commit that updates CHANGELOG.md
+- Follow the repository's existing versioning and release conventions.
+- When the project uses Semantic Versioning, preserve `MAJOR.MINOR.PATCH`.
+- Determine the version source of truth from release automation and project
+  metadata; do not assume one manifest across all ecosystems.
+- Bump versions and update changelogs only at the stage required by the
+  repository's release process.
 
 ### Conciseness
 - Answers are short, no loss of information.

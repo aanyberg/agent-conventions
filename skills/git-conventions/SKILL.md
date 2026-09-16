@@ -1,95 +1,85 @@
 ---
 name: git-conventions
-description: Use when committing, creating branches, opening PRs, or managing git workflow, including worktrees for parallel agents. Covers Conventional Commits, branch naming tied to backlog IDs, one-change-per-branch discipline, worktree isolation scripts, versioning policy, and actions agents must never take.
+description: Use when committing, creating branches, opening pull requests, or managing worktrees. Discovers and follows repository-native Git conventions, with conservative fallbacks when none exist.
 ---
 
 # Git Conventions
 
-Enforces Conventional Commits and disciplined branching across all projects. Values marked *policy* come from `<root>/.planning/policy.yml`, generated on first use from best-practice defaults if the file doesn't exist (see **backlog-management**'s `scripts/generate-policy.sh`); the defaults stated below apply for any individual key still missing from an existing file.
+## 1. Discover repository conventions
 
-## Commit Format
+Before a Git operation, inspect `AGENTS.md`, `CONTRIBUTING.md`, pull request
+templates, release documentation, CI, and recent history. Established
+repository conventions always take precedence.
 
-```
-<type>(<scope>): <imperative verb>
+Do not create configuration, a backlog item, or a task file merely to perform
+a Git operation. If the repository has no convention, use the fallbacks below.
 
-Optional longer description explaining why, not what.
-```
+## 2. Commit fallback
 
-**Types:** *policy* `git.commit_types`, default `feat`, `fix`, `chore`, `docs`, `refactor`, `test`. The set matches backlog item types so every item can have a matching branch.
+Use Conventional Commits when the repository has no established format:
 
-**Examples:**
-- `feat(auth): add JWT refresh rotation`
-- `fix(search): resolve partial index corruption`
-- `refactor(courses): extract pagination helper`
-- `test(enrolment): cover duplicate enrolment path`
-- `chore(deps): bump typescript to 5.1`
-- `docs(api): clarify retry backoff behavior`
-
-**Rules:**
-- Imperative mood only: "add", not "added" or "adds"
-- Lowercase after colon, no period at end
-- Scope optional but preferred
-- Breaking changes get `!` before colon: `feat!: remove legacy API`
-- Backlog-only commits use scope `backlog`: `chore(backlog): claim 231`
-
-## Branch Naming
-
-*policy* `git.branch_format`, default:
-
-```
-<type>/<id>-<short-kebab-description>
+```text
+<type>(<scope>): <imperative summary>
 ```
 
-`<id>` is the backlog-management ID. It lets tooling join branches, PRs, and items without parsing titles.
+Suggested types: `feat`, `fix`, `chore`, `docs`, `refactor`, and `test`.
+Keep the summary lowercase after the colon, omit the final period, and use `!`
+for a breaking change. Keep each commit focused on one logical change.
 
-**Examples:**
-- `feat/231-user-authentication`
-- `fix/244-cache-invalidation-race`
-- `docs/250-api-endpoint-reference`
-- `chore/backlog-sweep-2026-09-03-a1b2c3d` (routine branches carry a run ID instead)
+## 3. Branch fallback
 
-Match the branch type to the commit type. Legacy branches without an ID are allowed only for work predating the backlog claim rule.
+Use:
 
-## Pull Requests
+```text
+<type>/<short-kebab-description>
+```
 
-- Body contains `Closes #<id>` (github-issues backend) or the item ID in the first line (markdown backend).
-- Body sections: Summary, Verification (the merge-readiness rows with pass/fail), Backlog link.
-- Label `needs-human` when the diff touches any *policy* `autonomous.require_human_review_if_touches` path. Such PRs are never merged by an agent.
-- Draft PR as soon as the branch exists when working autonomously. It doubles as a visible claim.
+If a selected backlog backend and repository convention use work-item IDs,
+include the ID in the established position. Do not require an ID otherwise.
 
-## Versioning
+## 4. Pull requests
 
-*policy* `versioning.bump`:
-- `release-commit-only` (default): never bump `package.json` or `pyproject.toml` in a feature branch. Releases are cut in their own commit with `CHANGELOG.md`.
-- `per-branch`: bump in the branch per **code-standards**.
+- Follow the repository's pull request template and required checks.
+- Link a work item only when a backlog backend has been selected for the work.
+- Include structured task merge-readiness evidence only when that task workflow
+  is in use.
+- For autonomous work, open a draft PR early when the repository supports it.
+- Require human review for dependency changes, public API or schema changes,
+  migrations, CI/release workflows, or other repository-designated protected
+  paths.
 
-## Discipline
+## 5. Versioning
 
-- **One logical change per branch.** No "WIP" or "misc" commits on shared branches. Squash or amend first.
-- **Delete branches once merged.**
-- **Never commit to protected branches directly.**
-- **Forbidden without a human present:** force push, rewriting shared history, editing branch protection or rulesets, adding or upgrading a dependency, deleting or skipping a test. Mirrors *policy* `autonomous.forbidden`.
+Follow the repository's documented release process and version source of
+truth. Do not bump a version in a feature branch unless that process requires
+it. When no release convention exists, keep versioning out of unrelated
+changes.
 
-## Worktrees (parallel work only)
+## 6. Safety
 
-Use a worktree only when agents work concurrently on the same repo. Sequential single-agent work uses a plain branch.
+- Never commit directly to a protected branch.
+- Never force push or rewrite shared history without explicit authorization.
+- Do not edit branch protection or rulesets.
+- Do not add or upgrade dependencies, or delete or skip tests, without explicit
+  human authorization.
+- Delete branches after merge only when the repository's workflow expects it.
 
-Use the project scripts, *policy* `worktrees.up` and `worktrees.down`:
+## 7. Worktrees
+
+Use a worktree only for concurrent work. Prefer repository-provided worktree
+scripts and follow their documented arguments.
+
+If no helper exists, use at most one raw fallback worktree:
 
 ```bash
-scripts/worktree-up.sh <id> <branch>   # creates ../<repo>-<id>, allocates a port block,
-                                       # a DB name per id, writes .env, runs migrations
-cd ../<repo>-<id>                      # commit + push from here
-git push -u origin <branch>
-scripts/worktree-down.sh <id>          # drops DB, removes worktree, git worktree prune
-```
-
-If the scripts do not exist, do not improvise: create a `chore` backlog item for them and run at most one worktree until they are merged. Raw fallback for that single worktree:
-
-```bash
-git worktree add ../<repo>-<id> <branch>
-git worktree remove ../<repo>-<id>     # add --force to discard changes
+git worktree add ../<repo>-<work-id> <branch>
+git worktree remove ../<repo>-<work-id>
 git worktree prune
 ```
 
-**Rules:** no two worktrees share ports, DB names, or `.env`. Remove the worktree before declaring the task done. Run `git worktree list` to audit stragglers at the end of every run.
+Use an existing work-item ID as `<work-id>` when available; otherwise use a
+unique task slug or run identifier. Do not create a backlog just to name a
+worktree.
+
+Never share ports, database names, or environment files between concurrent
+worktrees. Remove task-created worktrees before reporting completion.

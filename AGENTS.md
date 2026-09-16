@@ -15,10 +15,23 @@
 
 ## Quick Reference
 
-**Policy:** `<root>/.planning/policy.yml` is read before any action that creates items, branches, or PRs. It defines backend, ID scheme, statuses, commit types, branch format, versioning, and autonomous limits. Missing file: `backlog-management`'s `scripts/generate-policy.sh` creates it from best-practice defaults (backend auto-detected) the first time it's needed, and reports what it generated. Never regenerated or overwritten silently after that — edit it directly to change anything.
-**Backlog:** only via `backlog-management`. Backend (`github-issues` or `BACKLOG.md`) resolved from policy, never assumed. Status `backlog → ready → active → in-review → done`, side states `blocked`, `cancelled`. Agents select `ready` + `agent-safe` only; only triage or a human sets those.
-**Task:** `<type>_<short-description>.md` in `.planning/tasks/` with Backlog ID, Status, Goal, Acceptance Criteria, Plan before any code.
-**Commits:** `<type>(<scope>): <imperative>`, types from policy (default `feat`, `fix`, `chore`, `docs`, `refactor`, `test`). Branches `<type>/<id>-<short-kebab>`.
-**Architecture:** record decisions as ADRs in `.planning/architecture.md`. Structural choices are blockers: surface and confirm, or set `blocked` when autonomous.
-**Agent rule:** no branch without a claimed item, no item without evidence, no code without a task file. Surface blockers, do not guess. Never force push, edit branch protection, add a dependency, or delete a test without a human.
-**Migration:** if a project still has `.agents/tasks/`, `.agents/planning/`, `.agents/architecture.md`, or `.agents/backlog.md`, migrate to `.planning/` and root `BACKLOG.md` automatically before proceeding (see `task-workflow` and `backlog-management`).
+**Repository first:** Skills follow the repository's existing instructions,
+tooling, tracker, documentation layout, and Git history. Loading a skill never
+creates a policy, backlog, task hierarchy, ADR system, branch, or pull request.
+
+**Backlog:** `backlog-management` first honors explicit instructions, then
+looks for an established `BACKLOG.md` or GitHub Issues work-item structure. If
+the choice remains ambiguous, ask whether to use GitHub Issues, `BACKLOG.md`, or
+no persistent backlog. Never silently switch backends after a failure.
+
+**Tasks:** Structured `.planning/tasks/` files are used only when already
+present or explicitly requested. Backlog tracking is independent.
+**Git:** Follow repository documentation and history; use the skill's
+Conventional Commit and branch formats only as fallbacks.
+**Architecture:** Follow existing decision-record conventions, including
+required ADRs. Create a new architecture/ADR convention or location only after
+an explicit request and confirmation.
+
+Always surface structural, public API, schema, dependency, and product
+decisions instead of guessing. Never force push, edit branch protection, add a
+dependency, or delete a test without human authorization.

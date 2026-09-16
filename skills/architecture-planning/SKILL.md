@@ -1,6 +1,6 @@
 ---
 name: architecture-planning
-description: Use when making architectural decisions, designing systems or components, choosing technologies, defining boundaries, or evaluating structural trade-offs. Maintains a living architecture.md and records decisions as ADRs. Language- and stack-agnostic.
+description: Use when making architectural decisions, designing systems or components, choosing technologies, defining boundaries, or evaluating structural trade-offs. Follows existing decision-record practices and can propose ADRs when none exist.
 ---
 
 # Architecture Planning
@@ -16,27 +16,38 @@ Engage this skill when a change touches **structure**, not just implementation:
 - Cross-cutting concerns: auth, observability, error handling, config, security, scaling
 - Anything expensive to reverse later
 
-If a task surfaces one of these, **stop and plan here before coding** — this is the "Surface blockers" path from **task-workflow** skill.
+If a task surfaces one of these, stop and resolve the decision before coding.
+When a structured task workflow is in use, record the unresolved choice as a
+blocker there.
 
-## Legacy Layout Migration
+## Decision records
 
-Older projects may still have `<root>/.agents/architecture.md`. Before reading or editing the architecture doc, check once per project:
+Before writing an architecture artifact:
 
-1. If `<root>/.agents/architecture.md` exists and `<root>/.planning/architecture.md` does not, create `<root>/.planning/` (if missing) and move the file there.
-2. Do this silently and automatically — it is additive and safe. Do not ask for confirmation.
+1. Inspect repository instructions and existing architecture or ADR files.
+2. Follow the established location, naming, and status conventions.
+3. If no convention exists, complete the analysis in the conversation.
+4. Create or update a persistent architecture record when repository practice
+   requires it or the user explicitly asks for one. Propose and confirm a
+   location only when establishing a new convention.
 
-## Two Artifacts
+Do not create `.planning/`, migrate legacy files, or establish an ADR system
+merely because this skill was loaded.
 
-| Artifact | Location | Purpose |
-|---|---|---|
-| `architecture.md` | in `<root>/.planning/` | Living description of the system **as it is now** |
-| ADR entries | `## Decisions` log in `architecture.md` | Immutable record of **why** a decision was made, with context and alternatives |
+## Optional artifacts
 
-Rule of thumb: `architecture.md` answers *"how does this work today?"*; ADRs answer *"why is it this way?"*. Keep `architecture.md` current by editing it; never rewrite history in an ADR — supersede it instead.
+When the repository uses them:
 
-## architecture.md Structure
+- A living architecture document answers "how does this work today?"
+- ADRs answer "why is it this way?"
 
-Keep it short and current. Delete stale sections rather than letting them rot.
+Keep the living document current. Never rewrite accepted ADR history; supersede
+an old decision with a new record.
+
+## Suggested architecture document structure
+
+Use this only when creating a new architecture document at the user's request
+and the repository has no template:
 
 ```markdown
 # Architecture
@@ -71,9 +82,10 @@ Index of ADRs with status. Link each.
 What was knowingly accepted, and what would force a rethink.
 ```
 
-## ADR Structure
+## Suggested ADR structure
 
-One decision per record. Numbered, dated, never deleted.
+Use this only when the repository has no ADR template. Keep one decision per
+record, number and date it, and never delete accepted history.
 
 ```markdown
 # ADR-<NNNN>: <short title>
@@ -103,11 +115,17 @@ Work through these as a dialogue with the user — do not decide unilaterally on
 3. **Generate real alternatives.** At least two genuine options, including "do nothing / defer." Bias toward the simplest thing that satisfies the constraints (KISS, YAGNI).
 4. **Evaluate against drivers, not preference.** Trade-offs explicitly: what each option costs. Prefer reversible decisions; spend the analysis budget on the irreversible ones.
 5. **Recommend, then confirm.** Give a clear recommendation with reasoning — not an unranked survey. Get user agreement before recording.
-6. **Record.** Write the ADR and update the affected `architecture.md` sections in the same change.
+6. **Record when requested or established.** Use the repository's existing
+   decision-record practice whenever it requires a record. If none exists,
+   return the confirmed decision in the response unless the user asked to
+   create a persistent record.
 
 ## Agent Discipline
 
-- A structural decision is a **Blocker** in `/task-workflow` terms — surface it, do not guess.
-- No new service, dependency, or boundary without an ADR and a recommendation the user has confirmed.
-- When a change makes `architecture.md` wrong, update it in the same branch — treat it like a failing test.
-- Superseding a decision: set the old ADR's status to `superseded by ADR-N`, write the new one; never edit the original's reasoning.
+- Surface structural decisions; do not guess. Record unresolved choices in the
+  active task system when one exists.
+- Require an ADR only when the repository already requires ADRs or the user
+  explicitly requests a new decision record.
+- Update an existing architecture document when the change makes it wrong.
+- Supersede existing ADRs according to the repository's convention; never
+  rewrite accepted reasoning.

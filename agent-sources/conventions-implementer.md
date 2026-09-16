@@ -17,7 +17,8 @@ criteria.
 
 - Require an approved outcome, acceptance criteria, and implementation plan.
 - Apply the task-workflow, code-standards, testing, and applicable language
-  conventions available in the project.
+  conventions available in the project. Never create a backlog or structured
+  task artifact unless the repository already uses it or the user requests it.
 - Inspect only the files and dependencies needed for the change.
 - Preserve existing behavior unless the task explicitly changes it.
 - Keep the diff focused and preserve pre-existing working-tree changes.

@@ -9,7 +9,9 @@ Python-specific idioms and type-system usage. Builds on the **Universal Code Rul
 
 ## Code Style
 
-- Use `model_dump()` for Pydantic model serialization; reserve `TypeAdapter` with `mode='json'` for collections or external SDKs needing JSON-compatible primitives — `TypeAdapter.dump_python(mode='json')` guarantees primitive types (dicts/lists/strings) instead of `BaseModel` instances when required by external systems
+- When the project already uses Pydantic, use `model_dump()` for model
+  serialization; reserve `TypeAdapter` with `mode='json'` for collections or
+  external SDKs needing JSON-compatible primitives.
 
 ## Type System
 
@@ -38,12 +40,17 @@ Python-specific idioms and type-system usage. Builds on the **Universal Code Rul
 
 ## Imports
 
-- Follow google coding guidelines for imports - prefer to import the module instead of items. For example, when you need to use pydantics `BaseModel`, import `pydantic` and use `pydantic.BaseModel`. The `typing`, `typing_extensions`, `collections`, and their submodules are exceptions.
+- Follow the project's configured import style. If no convention exists,
+  prefer module imports over individual items, with `typing`,
+  `typing_extensions`, `collections`, and their submodules as practical
+  exceptions.
 - Handle optional dependencies: (1) import inside functions to defer requirements, OR (2) use `try`/`except ImportError` at module level with helpful errors directing to install groups like `[web]`, `[bedrock]` — Keeps the package installable without all dependencies while providing clear guidance when optional features are used
 
 ## General
 
-- Projects generally use `hatch` as a project/environment manager. Use the appropriate skill, check the projects documentation, or `pyproject.toml` for entrypoints for testing, static analysis, etc.
+- Use the environment manager and test, lint, and type-check entrypoints
+  declared by the project documentation and `pyproject.toml`. Do not introduce
+  Hatch or another manager solely to follow this skill.
 
 ## Patterns & Idioms
 

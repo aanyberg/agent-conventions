@@ -19,13 +19,17 @@ export function relative(file) {
   return path.relative(ROOT, file).split(path.sep).join('/')
 }
 
+// Dot directories hold local, generated, or ignored state (.git, .planning,
+// .venv, installer output). Walking them turns a developer's private files
+// into repository test cases, so only real source directories are traversed.
 export function walk(dir, predicate) {
   const files = []
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === '.git' || entry.name === 'node_modules') continue
     const file = path.join(dir, entry.name)
-    if (entry.isDirectory()) files.push(...walk(file, predicate))
-    else if (entry.isFile() && predicate(file)) files.push(file)
+    if (entry.isDirectory()) {
+      if (entry.name.startsWith('.') || entry.name === 'node_modules') continue
+      files.push(...walk(file, predicate))
+    } else if (entry.isFile() && predicate(file)) files.push(file)
   }
   return files.sort()
 }
@@ -61,10 +65,6 @@ export function agentFiles() {
 
 export function markdownFiles() {
   return walk(ROOT, (file) => file.endsWith('.md'))
-}
-
-export function shellScripts() {
-  return walk(path.join(ROOT, 'skills'), (file) => file.endsWith('.sh'))
 }
 
 export function readJson(rel) {

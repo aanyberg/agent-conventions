@@ -32,19 +32,35 @@ Add the marketplace and enable the plugin in the consumer repo's `.claude/settin
 
 The skills in this repo are portable — [`skills/`](../skills) follows the [Agent Skills specification](https://agentskills.io/specification), so Codex, GitHub Copilot, OpenCode, Cursor and Gemini CLI can all load the same copy. Agents have no equivalent cross-provider file specification; the package installer renders the canonical definitions into each provider's native format and path. The rest of this document covers the Claude Code plugin route specifically; for other providers see **Agents — every target provider** in the root [README.md](../README.md).
 
-## `CLAUDE.md` header
+## Repository-native behavior
 
-Every consumer repo's `CLAUDE.md` should start with:
+Installing or enabling the plugin does not impose its planning workflow.
+Skills follow the consumer repository's existing instructions and
+conventions. They create no policy, backlog, task hierarchy, architecture
+record, branch, or changelog solely because the plugin is present.
 
-```markdown
-Backlog lives in GitHub Issues. Read .planning/policy.yml before any action that creates items, branches, or PRs.
-```
+This is the right mode for repositories that already have their own tracker
+and contribution process, and for new repositories that only want the
+language, testing, review, and documentation guidance.
 
-## `.planning/policy.yml` — you don't need to write this yourself
+## Choosing backlog tracking
 
-The header above tells the agent to read `.planning/policy.yml`, but a new consumer repo won't have one yet, and doesn't need to create it manually. The first time a policy-dependent skill (`backlog-management`, `task-workflow`, `git-conventions`) needs it and finds it missing, it generates `.planning/policy.yml` from [`policy.example.yml`](../policy.example.yml) — best-practice defaults, with `backlog.backend` auto-detected from your GitHub remote — and reports what it generated in that session's response. It never regenerates or overwrites the file again after that.
+The backlog skill does not use a central configuration file. For a backlog
+operation it checks, in order:
 
-If you want to guarantee the GitHub Issues backend the header above promises (rather than relying on auto-detection), set `backlog.backend: github-issues` explicitly once the file exists. Every other value in it — commit types, branch format, versioning, autonomous limits — is a starting point, not a fixed rule; edit the file directly and it takes effect on the next run.
+1. The backend explicitly named in the request.
+2. Repository instructions naming a tracker.
+3. An established `BACKLOG.md` or GitHub Issues work-item structure, including
+   repository-specific labels, fields, projects, or statuses.
+
+If those signals do not identify one backend, the agent asks whether to use
+GitHub Issues, `BACKLOG.md`, or no persistent backlog. A GitHub remote by itself
+does not select GitHub Issues. To make a choice permanent, document it in the
+repository's existing `AGENTS.md` or contributing guide.
+
+Structured task files and ADRs are independent. The corresponding skills follow
+established repository requirements, including required ADRs. They establish a
+new task or ADR convention only after an explicit request and confirmation.
 
 ## Local setup (one-time, per machine)
 

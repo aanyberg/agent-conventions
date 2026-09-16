@@ -14,6 +14,26 @@ This repository contains:
 
 These components enhance AI coding assistants by providing domain knowledge, coding conventions, and structured workflows.
 
+## Repository-native by default
+
+Installing the package does not opt a repository into a particular planning or
+governance process. Skills follow the repository's existing contributor
+instructions, tooling, issue tracker, documentation layout, and Git history.
+They do not create policy files, planning hierarchies, backlogs, or ADR systems
+merely because they are installed.
+
+When a backlog operation is requested, `backlog-management` honors an explicit
+choice, then checks repository instructions and existing tracker structure. If
+that evidence does not identify exactly one backend, it asks whether to use
+GitHub Issues, `BACKLOG.md`, or no persistent backlog. The answer is
+conversation-scoped unless the user chooses to document it in an existing
+repository instruction file.
+
+Structured task files and architecture records are similarly used only when
+already established or explicitly requested. The GitHub Issues and Markdown
+backend documents remain reusable adapters rather than a mandatory operating
+model.
+
 ## Installation
 
 ### Everything, one command
@@ -242,10 +262,9 @@ See [Removing](#removing) for how to take any of this back off.
 ## Validation
 
 Every change is gated by a validation suite. It parses the same files Claude Code
-parses at load time — so a failure means the plugin would load wrong — checks each
+parses at load time — so a failure means the plugin would load wrong — and checks each
 skill against the [Agent Skills specification](https://agentskills.io/specification)
-so the single copy stays installable in every other agent, and runs the shipped shell
-scripts end to end in throwaway git repos.
+so the single copy stays installable in every other agent.
 
 ```bash
 npm test
@@ -254,6 +273,8 @@ npm test
 It needs no API access or GitHub auth — `gh` is stubbed.
 `.github/workflows/validate.yml` gates every pull request on Linux, and repeats the
 suite on macOS after merge to `main` as a canary.
+Supported runtimes and the per-provider agent-file contracts are documented in
+[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
 
 What it checks:
 
@@ -265,12 +286,9 @@ What it checks:
 | Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |
 | Skills | frontmatter has `name` and `description`, `name` matches the directory, names are unique, descriptions fit the loader budget, and every key is one the Agent Skills spec permits — `version` is not one of them, it belongs inside `metadata` |
 | Agents | canonical names are package-prefixed; abstract capabilities, access, model tier, effort, and turn limits are valid; read-only roles cannot request writes; every provider renderer preserves identity and behavior |
-| References | relative markdown links resolve, shipped scripts are executable with a shebang, and every skill or agent named in prose exists |
-| Policy | `policy.example.yml` parses, has exactly one copy, keeps the `backend: auto` line `generate-policy.sh` substitutes, and contains every key the skills read |
-| Scripts | `detect-backend.sh` and `generate-policy.sh` run against real git repos with a stubbed `gh`: explicit and auto backend resolution, the incomplete-migration guard, idempotent generation, a missing template, and a round trip proving what one writes the other reads back |
-| Shell lint | ShellCheck 0.11.0 with `--severity=warning` over every shipped script; `npm test` downloads the official platform binary once and verifies its SHA-256 digest |
+| References | relative markdown links resolve and every skill or agent named in prose exists |
+| Workflow portability | no policy files or policy scripts are shipped; backlog selection asks only when explicit instructions and repository evidence remain ambiguous; structured tasks and architecture records require existing use or explicit intent |
 | Cross-agent portability | the repo ships one copy of each skill, so no skill or agent body may depend on a single vendor: no interpolated `${CLAUDE_*}` variable, no vendor component directory (`.claude/skills/`, `.cursor/rules/`, …), no vendor instruction file (`CLAUDE.md`, `copilot-instructions.md`), and no tool named from one agent's vocabulary. Naming a vendor directory as somewhere *not* to write stays legal — `task-workflow` does exactly that with `~/.claude` and `~/.copilot`. Each rule is pinned to a sample it must catch and a sample it must ignore, so a regex that rots fails loudly instead of passing on everything |
-| Script portability | shipped scripts use no GNU-only regex escape (`\s`, `\d`, `\w`, …) or flag (`grep -P`, bare `sed -i`, `readlink -f`, `date -d`). shellcheck does not parse regex arguments, and a `\s` in `sed -E` silently produced a wrong backend on macOS while passing every Linux run |
 
 Adding a skill or agent needs no test changes — the suite discovers files dynamically
 and creates a subtest per file, so each one fails independently with its own path.

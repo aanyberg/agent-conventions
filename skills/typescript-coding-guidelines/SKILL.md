@@ -22,7 +22,9 @@ Applies to all `.ts`, `.tsx`, `.js`, and `.jsx` files. Builds on the **Universal
 - Remove `| undefined` from fields when values are guaranteed to be initialized — prevents false optionality and unnecessary non-null checks
 - Avoid `@ts-ignore`; use `@ts-expect-error` only when unavoidable, always with a comment explaining why the suppression is safe and what error it hides
 - Fix type errors properly — use type annotations, narrowing, or `as` with explanatory comments — prevents masking real type errors that indicate structural problems
-- **`strict: true` is non-negotiable** — it enables `noImplicitAny`, `strictNullChecks`, `strictFunctionTypes`, and related checks; never disable it project-wide
+- Preserve the repository's TypeScript strictness settings. For a new
+  TypeScript configuration, prefer `strict: true`; do not change project-wide
+  compiler semantics as an incidental edit.
 
 ## Error Handling
 
@@ -38,9 +40,13 @@ Applies to all `.ts`, `.tsx`, `.js`, and `.jsx` files. Builds on the **Universal
 ## Imports
 
 - Prefer named exports over default exports — named exports improve refactoring support, IDE discoverability, and make re-exporting explicit
-- Use barrel files (`index.ts`) to define the public API of a module — export only what consumers need; do not re-export internal implementation details
+- Preserve the project's module-boundary convention. If it already uses barrel
+  files (`index.ts`), export only the public API and do not re-export internal
+  implementation details; do not introduce barrels into a project that avoids
+  them.
 - Avoid circular imports — if two modules depend on each other, extract shared logic into a third module
-- Group imports consistently: external packages first, then internal modules (`@/`, `~/`, relative), separated by a blank line; enforce with ESLint's `import/order` rule or Biome
+- Follow the project's configured import ordering. If ESLint or Biome already
+  enforces an order, let that configuration be authoritative.
 
 ## Testing
 
@@ -48,8 +54,12 @@ Applies to all `.ts`, `.tsx`, `.js`, and `.jsx` files. Builds on the **Universal
 
 ## General
 
-- Use `pnpm` by default unless `package.json` scripts or project docs specify `npm` or `yarn`
-- Run `eslint` and `prettier` (or `biome`) before committing — enforce via pre-commit hooks or CI; never disable rules project-wide without a documented reason
+- Use the package manager selected by the lockfile, `packageManager` field,
+  project documentation, or existing CI. Do not create a new lockfile solely
+  to follow this skill.
+- Run the repository's configured lint and formatting commands before
+  committing. Do not introduce ESLint, Prettier, Biome, or new hooks solely to
+  follow this skill.
 - Prefer `const` over `let`; never use `var` — `const` communicates immutability of the binding and prevents accidental reassignment
 - Use optional chaining (`?.`) and nullish coalescing (`??`) instead of manual null guards — more concise and avoids incorrectly coalescing on `0`, `""`, or `false`
 - Use `structuredClone()` for deep cloning plain objects instead of `JSON.parse(JSON.stringify(...))` — handles more types correctly and is faster in modern runtimes

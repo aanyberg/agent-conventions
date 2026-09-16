@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when implementing any feature or bugfix, before writing implementation code
+description: Use when the user requests test-driven development or the repository already follows a red-green-refactor workflow.
 ---
 
 # Test-Driven Development (TDD)
@@ -15,17 +15,21 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 ## When to Use
 
-**Always:** new features, bug fixes, refactoring, behavior changes.
+Use TDD when the user requests it, the repository documents it, or an existing
+task explicitly requires a red-green-refactor loop. Otherwise follow the
+repository's normal testing workflow and still add appropriate regression
+coverage for changed behavior.
 
-**Exceptions (confirm with user):** throwaway prototypes, generated code, configuration files.
+Typical exceptions even in a TDD project are generated code, configuration-only
+changes, and disposable prototypes.
 
-## The Iron Law
+## The TDD constraint
 
 ```
 NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 ```
 
-Write code before the test? Delete it. No exceptions — no keeping it as "reference," no "adapting" it. Delete means delete.
+While using TDD, do not write production behavior before its failing test.
 
 ## Red-Green-Refactor
 
@@ -80,7 +84,7 @@ Write the next failing test for the next behavior.
 | **Clear** | Name describes the behavior | `test('test1')` |
 | **Shows intent** | Demonstrates desired API | Obscures what code should do |
 
-## Red Flags — Stop and Start Over
+## Red flags while using TDD
 
 - Code written before test
 - Test added after implementation
@@ -91,11 +95,11 @@ Write the next failing test for the next behavior.
 - "Tests after achieve the same purpose"
 - "Keep as reference" or "adapt existing code"
 - "Already spent X hours, deleting is wasteful"
-- "TDD is dogmatic, I'm being pragmatic"
 - "This is different because..."
 - "It's about spirit not ritual"
 
-**All of these mean: delete the code, start over with TDD.**
+These indicate that the agreed TDD loop was skipped. Return to the missing red
+step before continuing.
 
 ## Verification Checklist
 
@@ -110,4 +114,5 @@ Before marking work complete:
 - [ ] Tests use real code (mocks only if unavoidable)
 - [ ] Edge cases and errors covered
 
-Can't check all boxes? You skipped TDD. Start over.
+If a box cannot be checked, state why and follow the repository's agreed
+testing process.

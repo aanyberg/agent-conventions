@@ -19,7 +19,10 @@ description: Rust design patterns including KISS, Separation of Concerns, Single
 
 - **KISS** — Choose the simplest solution that works. A plain `enum` + `match` beats a trait-object registry. A free function beats a trait with one impl. Complexity must earn its place.
 - **Single Responsibility (SRP)** — Each type/module has one reason to change. Wire parsing, business rules, and persistence belong in separate types — not one God struct.
-- **Separation of Concerns** — Layer as: handler → service → repository. Each layer depends only on layers below via traits; the service must never know about HTTP types or SQL rows.
+- **Separation of Concerns** — Keep transport, business rules, and persistence
+  separate when the component needs those concerns, while preserving the
+  repository's existing boundaries. Do not introduce three layers for a simple
+  component.
 - **Composition Over Inheritance** — Rust has no inheritance by design. Build behavior by combining structs and implementing traits; inject collaborators as fields, not by extending a base type.
 - **Parse, Don't Validate** — Push validation to the boundary and return a type that cannot be invalid (newtype, validated struct, enum). Downstream code trusts the type instead of re-checking.
 - **Make Illegal States Unrepresentable** — Model mutually-exclusive states as `enum` variants, not structs of `Option` fields. Let the type system reject invalid combinations at compile time.
@@ -31,7 +34,10 @@ description: Rust design patterns including KISS, Separation of Concerns, Single
 - **Dependency Injection via traits** — Define a trait for each collaborator; inject it as a generic field or `Box<dyn Trait>`. Production wires real impls; tests wire fakes — no mocking framework required.
 - **Don't expose internal types** — Use dedicated request/response (DTO) types at API boundaries, not your domain structs or DB row types. Implement `From` to convert between layers.
 - **Don't mix I/O with business logic** — Keep core logic pure and synchronous over owned/borrowed data; confine `async`, filesystem, network, and DB calls to the edges (repositories, adapters). Pure cores are trivially testable.
-- **Errors as types, not strings** — Model failure modes as a `thiserror` enum per layer; convert across boundaries with `#[from]`. Reserve `anyhow` for the application edge.
+- **Errors as types, not strings** — Model meaningful failure modes as
+  structured error types and convert at boundaries using the project's
+  existing error approach. Do not add `thiserror` or `anyhow` solely for this
+  pattern.
 - **Explicit over clever** — Readable code beats elegant code. Avoid deep generic gymnastics and macro magic when a plain function will do.
 
 ## Composition & Dependency Injection Example

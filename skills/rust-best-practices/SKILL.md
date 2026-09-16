@@ -93,7 +93,9 @@ fn process_input<R: Read>(mut source: R) -> std::io::Result<Vec<u8>> {
 
 ## Error Handling
 
-Use `Result<T, E>` and `?`. Define a domain error enum with `thiserror` for libraries; preserve the cause chain via `#[source]`/`#[from]`.
+Use `Result<T, E>` and `?`. Define a structured domain error for libraries and
+preserve the cause chain. The following `thiserror` example applies when the
+project already depends on it:
 
 ```rust
 use thiserror::Error;
@@ -125,7 +127,9 @@ fn load_config(path: &std::path::Path) -> Result<Config, AppError> {
 }
 ```
 
-For application/binary code where callers won't `match` on the variant, prefer `anyhow` with `.context(...)`:
+For application/binary code where callers will not `match` on the variant, add
+context with the project's existing error approach. When `anyhow` is already
+available:
 
 ```rust
 use anyhow::Context;
@@ -147,7 +151,9 @@ let port: u16 = "8080".parse().expect("hardcoded port is a valid u16");
 
 ## Structured Logging
 
-Use the `tracing` crate with structured fields rather than string interpolation — fields are captured as data, not baked into the message:
+Use the project's existing logging facade and preserve structured fields. When
+the project already uses `tracing`, fields are captured as data rather than
+baked into the message:
 
 ```rust
 use tracing::{debug, info};

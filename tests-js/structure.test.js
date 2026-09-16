@@ -1,9 +1,8 @@
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import fs from 'node:fs'
 import path from 'node:path'
 import { describe, test } from 'node:test'
-
-import { parse as parseYaml } from 'yaml'
 
 import {
   ROOT,
@@ -14,9 +13,7 @@ import {
   markdownFiles,
   parseFrontmatter,
   relative,
-  shellScripts,
   skillFiles,
-  walk,
 } from '../test-utils/repository.js'
 
 const NAME = /^[a-z0-9]+(?:-[a-z0-9]+)*$/
@@ -156,6 +153,16 @@ const NOT_A_REFERENCE = new Set([
 ])
 
 describe('cross-references', () => {
+  test('markdown discovery covers tracked files only', () => {
+    const discovered = markdownFiles().map(relative)
+    const untracked = discovered.filter(
+      (file) => file.startsWith('.') || file.includes('node_modules/'),
+    )
+    assert.deepEqual(untracked, [])
+    assert.ok(discovered.includes('README.md'))
+    assert.ok(discovered.includes('skills/backlog-management/SKILL.md'))
+  })
+
   for (const file of markdownFiles()) {
     test(`${relative(file)} has no broken relative links`, () => {
       const broken = [...fs.readFileSync(file, 'utf8').matchAll(LINK)]
@@ -164,39 +171,6 @@ describe('cross-references', () => {
       assert.deepEqual(broken, [])
     })
   }
-
-  test('shipped scripts are executable and have a shebang', () => {
-    const problems = []
-    for (const script of shellScripts()) {
-      try {
-        fs.accessSync(script, fs.constants.X_OK)
-      } catch {
-        problems.push(`${relative(script)} (not executable)`)
-      }
-      if (!fs.readFileSync(script, 'utf8').startsWith('#!')) {
-        problems.push(`${relative(script)} (no shebang)`)
-      }
-    }
-    assert.deepEqual(problems, [])
-  })
-
-  test('references to shipped scripts name their owning skill', () => {
-    const shipped = new Map(shellScripts().map((script) => [path.basename(script), script]))
-    const problems = []
-    for (const file of [...skillFiles(), ...agentFiles()]) {
-      const text = fs.readFileSync(file, 'utf8')
-      for (const match of text.matchAll(/[\w./-]*scripts\/([A-Za-z0-9_.-]+\.sh)/g)) {
-        const script = shipped.get(match[1])
-        if (!script) continue
-        const owner = path.basename(path.dirname(path.dirname(script)))
-        if (path.basename(path.dirname(file)) !== owner &&
-            !text.includes(`**${owner}**`) && !text.includes(owner)) {
-          problems.push(`${relative(file)} references scripts/${match[1]} without naming ${owner}`)
-        }
-      }
-    }
-    assert.deepEqual(problems, [])
-  })
 
   test('skill and agent names referenced in prose exist', () => {
     const known = new Set([
@@ -214,58 +188,179 @@ describe('cross-references', () => {
   })
 })
 
-const POLICY_TEMPLATE = path.join(ROOT, 'policy.example.yml')
-const POLICY_REF = /\b(?:policy\.)?((?:backlog|ids|statuses|states|git|review|versioning|autonomous|checks|worktrees|tests|reporting)(?:\.[a-z_]+)+)\b/g
-const FILE_EXTENSIONS = new Set(['md', 'yml', 'yaml', 'json', 'sh', 'py', 'toml'])
-
-function flattenKeys(value, prefix = '') {
-  const keys = new Set()
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return keys
-  for (const [key, nested] of Object.entries(value)) {
-    const current = `${prefix}${key}`
-    keys.add(current)
-    for (const child of flattenKeys(nested, `${current}.`)) keys.add(child)
-  }
-  return keys
-}
-
-function referencedPolicyKeys() {
-  const refs = new Map()
-  for (const file of [...skillFiles(), ...agentFiles()]) {
-    for (const match of fs.readFileSync(file, 'utf8').matchAll(POLICY_REF)) {
-      const key = match[1]
-      if (FILE_EXTENSIONS.has(key.slice(key.lastIndexOf('.') + 1))) continue
-      refs.set(key, [...(refs.get(key) ?? []), relative(file)])
-    }
-  }
-  return refs
-}
-
-describe('policy template', () => {
-  test('exists', () => {
-    assert.ok(fs.statSync(POLICY_TEMPLATE).isFile())
-  })
-
-  test('parses as YAML', () => {
-    const parsed = parseYaml(fs.readFileSync(POLICY_TEMPLATE, 'utf8'))
-    assert.ok(parsed && typeof parsed === 'object' && !Array.isArray(parsed))
-  })
-
-  test('keeps backend auto for generation', () => {
-    assert.match(fs.readFileSync(POLICY_TEMPLATE, 'utf8'), /^\s*backend: auto\s*$/m)
-  })
-
-  test('is the only policy template', () => {
+describe('repository-native workflow contract', () => {
+  test('ships no central policy or policy-management scripts', () => {
+    const removed = [
+      'policy.example.yml',
+      'skills/backlog-management/policy.example.yml',
+      'skills/backlog-management/scripts/detect-backend.sh',
+      'skills/backlog-management/scripts/generate-policy.sh',
+      'skills/backlog-management/scripts/init-managed-workflow.sh',
+    ]
     assert.deepEqual(
-      walk(ROOT, (file) => path.basename(file) === 'policy.example.yml').map(relative),
-      ['policy.example.yml'],
+      removed.filter((file) => fs.existsSync(path.join(ROOT, file))),
+      [],
     )
   })
 
-  const templateKeys = flattenKeys(parseYaml(fs.readFileSync(POLICY_TEMPLATE, 'utf8')))
-  for (const [key, files] of [...referencedPolicyKeys()].sort()) {
-    test(`declares referenced policy key ${key}`, () => {
-      assert.ok(templateKeys.has(key), `referenced in: ${[...new Set(files)].sort().join(', ')}`)
-    })
-  }
+  test('shipped guidance has no policy dependency', () => {
+    const files = [
+      ...skillFiles(),
+      ...agentFiles(),
+      path.join(ROOT, 'AGENTS.md'),
+      path.join(ROOT, 'README.md'),
+      path.join(ROOT, 'docs', 'CONSUMER.md'),
+    ]
+    const pattern = /\.planning\/policy\.yml|\bpolicy\.(?:backlog|git|versioning|autonomous|worktrees)|\bworkflow\.(?:backlog|tasks|architecture|autonomous)/
+    const offenders = files
+      .filter((file) => pattern.test(fs.readFileSync(file, 'utf8')))
+      .map(relative)
+    assert.deepEqual(offenders, [])
+  })
+
+  test('backlog selection asks only when repository evidence is ambiguous', () => {
+    const backlog = fs.readFileSync(
+      path.join(ROOT, 'skills', 'backlog-management', 'SKILL.md'),
+      'utf8',
+    )
+    assert.match(
+      backlog,
+      /Honor an explicit selection in the user's request: GitHub Issues,\s+`BACKLOG\.md`, or no persistent backlog/s,
+    )
+    assert.match(backlog, /Any documented selection is\s+authoritative/s)
+    assert.match(
+      backlog,
+      /If an explicit or documented selection exists, use it and stop resolution/,
+    )
+    assert.match(
+      backlog,
+      /Only when neither the request nor repository instructions select an option,\s+inspect existing state/s,
+    )
+    assert.match(
+      backlog,
+      /repository-specific labels, fields, projects, or statuses, is evidence for\s+the GitHub Issues backend/s,
+    )
+    assert.match(backlog, /exactly one backend is established, use it/)
+    assert.match(backlog, /If neither or both are\s+plausible, ask the user to choose/s)
+    assert.match(backlog, /GitHub remote or enabled Issues feature alone is not a backend choice/)
+    assert.match(backlog, /Do not create a policy or private configuration file/)
+    assert.match(
+      backlog,
+      /Load `backends\/<backend>\.md` only for GitHub Issues or\s+Markdown/s,
+    )
+  })
+
+  test('keeps both backlog backend adapters', () => {
+    for (const backend of ['github-issues.md', 'markdown.md']) {
+      const file = path.join(
+        ROOT,
+        'skills',
+        'backlog-management',
+        'backends',
+        backend,
+      )
+      assert.ok(fs.statSync(file).isFile())
+      assert.doesNotMatch(
+        fs.readFileSync(file, 'utf8'),
+        /\.planning\/policy\.yml|\bpolicy\./,
+      )
+    }
+  })
+
+  test('publishes only the backlog skill and its two adapters', () => {
+    const packed = JSON.parse(execFileSync(
+      'npm',
+      ['pack', '--dry-run', '--json', '--silent'],
+      { cwd: ROOT, encoding: 'utf8' },
+    ))
+    const backlogPaths = packed[0].files
+      .map((file) => file.path)
+      .filter((file) => file.startsWith('skills/backlog-management/'))
+      .sort()
+    assert.deepEqual(backlogPaths, [
+      'skills/backlog-management/SKILL.md',
+      'skills/backlog-management/backends/github-issues.md',
+      'skills/backlog-management/backends/markdown.md',
+    ])
+  })
+
+  test('task workflow activates structured files only from evidence or intent', () => {
+    const taskWorkflow = fs.readFileSync(
+      path.join(ROOT, 'skills', 'task-workflow', 'SKILL.md'),
+      'utf8',
+    )
+    assert.match(taskWorkflow, /Loading\s+this skill does not create `.planning\/`/s)
+    assert.match(taskWorkflow, /user explicitly requests it/)
+    assert.match(taskWorkflow, /repository already contains `.planning\/tasks\/`/)
+    assert.match(taskWorkflow, /Backlog tracking is independent/)
+  })
+
+  test('architecture records activate from repository practice or intent', () => {
+    const architecture = fs.readFileSync(
+      path.join(ROOT, 'skills', 'architecture-planning', 'SKILL.md'),
+      'utf8',
+    )
+    assert.match(
+      architecture,
+      /when repository practice\s+requires it or the user explicitly asks/s,
+    )
+    assert.match(
+      architecture,
+      /Propose and confirm a\s+location only when establishing a new convention/s,
+    )
+    for (const file of [
+      path.join(ROOT, 'AGENTS.md'),
+      path.join(ROOT, 'docs', 'CONSUMER.md'),
+    ]) {
+      const guidance = fs.readFileSync(file, 'utf8')
+      assert.match(guidance, /required ADRs/)
+      assert.match(
+        guidance,
+        /new .*ADR convention.*only (?:when|after)\s+an explicit request/s,
+      )
+    }
+  })
+
+  test('workflow-aware agents preserve repository-native behavior', () => {
+    for (const name of [
+      'conventions-code-reviewer.md',
+      'conventions-docs-steward.md',
+      'conventions-implementer.md',
+      'conventions-planner.md',
+    ]) {
+      const file = path.join(ROOT, 'agent-sources', name)
+      const text = fs.readFileSync(file, 'utf8')
+      assert.match(text, /repository/, relative(file))
+      assert.doesNotMatch(text, /policy|generic or managed mode/, relative(file))
+    }
+  })
+
+  test('language guidance does not impose optional tools or dependencies', () => {
+    const forbiddenDefaults = [
+      ['skills/python-coding-guidelines/SKILL.md', /Projects generally use `hatch`/],
+      ['skills/typescript-coding-guidelines/SKILL.md', /Use `pnpm` by default/],
+      ['skills/typescript-coding-guidelines/SKILL.md', /Use barrel files .* to define/],
+      ['skills/typescript-coding-guidelines/SKILL.md', /Run `eslint` and `prettier`/],
+      ['skills/typescript-coding-guidelines/SKILL.md', /`strict: true` is non-negotiable/],
+      ['skills/rust-coding-guidelines/SKILL.md', /Use `anyhow` .* for application/],
+      ['skills/rust-coding-guidelines/SKILL.md', /Set `#!\[deny\(warnings\)\]`/],
+    ]
+    for (const [file, pattern] of forbiddenDefaults) {
+      assert.doesNotMatch(fs.readFileSync(path.join(ROOT, file), 'utf8'), pattern, file)
+    }
+  })
+
+  test('TDD activates only from repository practice or user intent', () => {
+    const tdd = fs.readFileSync(
+      path.join(ROOT, 'skills', 'test-driven-development', 'SKILL.md'),
+      'utf8',
+    )
+    const strategy = fs.readFileSync(
+      path.join(ROOT, 'skills', 'testing-strategy', 'SKILL.md'),
+      'utf8',
+    )
+    assert.match(tdd, /when the user requests it, the repository documents it/)
+    assert.match(strategy, /When the repository or user has selected TDD/)
+    assert.doesNotMatch(tdd, /\*\*Always:\*\*/)
+  })
 })

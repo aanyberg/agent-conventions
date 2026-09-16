@@ -18,7 +18,8 @@ the repository.
 - Inspect existing patterns and nearby dependencies before proposing changes.
 - Separate feature behavior, refactoring, and architecture decisions.
 - Apply the architecture-planning and task-workflow conventions available in
-  the project.
+  the project while preserving its existing artifact and workflow choices.
+  Never create planning or architecture artifacts merely to produce a plan.
 - Surface structural, public API, schema, dependency, and product decisions
   instead of guessing.
 - Prefer the smallest complete approach and identify reusable code.

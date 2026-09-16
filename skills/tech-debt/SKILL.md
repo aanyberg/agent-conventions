@@ -35,7 +35,10 @@ Score Effort on its raw scale — the `(6 − Effort)` term inverts it so cheap,
 
 Produce a prioritized list with estimated effort, business justification for each item, and a phased remediation plan that can be done alongside feature work.
 
-Feed the results into the existing workflow rather than letting them sit in a report:
+Return the prioritized report first. If the user asks to persist the findings,
+use the repository's existing work system. Invoke **backlog-management** when
+the backend is not already known; it will discover the repository convention
+or ask the user. Never assume `BACKLOG.md` is the destination.
 
-- Add each item to `BACKLOG.md` as a `refactor` (or matching type) row via the **backlog-management** skill.
-- Promote high-priority items to task files through the **task-workflow** skill before starting work.
+Use **task-workflow** for high-priority items only when the repository already
+uses structured task files or the user explicitly requests them.

@@ -32,8 +32,12 @@ Applies to all `.rs` files and `Cargo.toml`. Builds on the **Universal Code Rule
 
 - Use `Result<T, E>` for recoverable errors and the `?` operator to propagate — never `unwrap()`/`expect()` in library or production paths
 - Reserve `panic!`, `unwrap`, and `expect` for unreachable invariants and tests; when used, `expect("reason")` must state the invariant that makes it infallible
-- Define domain error enums with `thiserror` for libraries — one variant per failure mode, with `#[from]` for automatic conversion and `#[source]` to preserve the cause chain
-- Use `anyhow` (with `.context("...")`) for application/binary code where callers won't match on the error variant — add context at each layer so the chain reads top-down
+- Define structured domain errors using the project's existing error approach.
+  When `thiserror` is already available, one variant per failure mode with
+  `#[from]` and `#[source]` preserves the cause chain without boilerplate.
+- In application code where callers do not match error variants, add context
+  using the project's existing error library. Use `anyhow::Context` only when
+  `anyhow` is already an adopted dependency.
 - Add context when propagating across an abstraction boundary — a bare `?` that surfaces a low-level IO error to a user is worse than `.context("reading config from {path}")`
 - Return `Result` instead of sentinel values; use `Option<T>` for genuine absence (not failure), and convert with `.ok_or(...)` / `.ok_or_else(...)`
 - Never silently discard a `Result` — handle it, propagate with `?`, or explicitly `let _ =` with a comment explaining why the error is safe to ignore
@@ -60,8 +64,11 @@ Applies to all `.rs` files and `Cargo.toml`. Builds on the **Universal Code Rule
 ## General
 
 - Use `cargo` as the single entrypoint: `cargo build`, `cargo test`, `cargo clippy`, `cargo fmt` — check the project's docs for any wrapper before assuming
-- Run `cargo clippy` before committing and fix lints rather than `#[allow(...)]`-ing them; an `#[allow]` must carry a comment explaining why the lint is wrong here
-- Set `#![deny(warnings)]` or wire `-D warnings` in CI; never disable lints crate-wide without a documented reason
+- Run the repository's configured lint command before committing. When it uses
+  Clippy, fix findings rather than adding `#[allow(...)]`; a necessary allow
+  should explain why the lint is wrong here.
+- Preserve the repository's warning policy. For new crates, prefer enforcing
+  warnings in CI; do not change crate-wide lint levels incidentally.
 - Prefer immutability — `let` over `let mut`; introduce `mut` only where a value genuinely changes
 - Pin the edition in `Cargo.toml` and keep dependencies minimal — each crate is a maintenance and audit surface
 

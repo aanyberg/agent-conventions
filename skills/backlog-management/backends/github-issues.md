@@ -1,6 +1,12 @@
 # Backend: github-issues
 
-ID = issue number. Labels are the state machine. Closed state carries `done`/`cancelled`.
+Use the repository's existing issue fields, labels, and lifecycle when present.
+The schema below is the fallback for a repository that has chosen GitHub Issues
+but has no established backlog convention. Confirm it before creating labels
+or rewriting existing issues.
+
+ID = issue number. In the fallback schema, labels are the state machine and the
+closed state carries `done` or `cancelled`.
 
 ## Label scheme
 
@@ -25,12 +31,15 @@ ID = issue number. Labels are the state machine. Closed state carries `done`/`ca
 | `release cancelled` | `gh issue close --reason "not planned" --comment "<reason>"`. |
 | `release backlog` | Remove assignee, set `status:ready` (if criteria intact) or `status:backlog`, comment why. |
 | `inFlight` | `list` filtered to `status:active` or `status:in-review`, join with `gh pr list --state open --json number,headRefName,body` on `Closes #n`. |
-| `nextEligible` | `list` filtered `status:ready`, `agent-safe`, type in policy, no assignee, all `## Depends On` closed. Sort priority high→low, then createdAt asc. |
-| `render` | `scripts/backlog-render.sh > BACKLOG.md`. Commit only from a scheduled job or as part of a sweep PR, never from a task branch. |
+| `nextEligible` | `list` filtered to ready, explicitly agent-safe, unassigned items whose dependencies are closed. Sort by repository priority, then age. |
+| `render` | Run the repository's existing renderer when one exists. Do not create a Markdown mirror by default. |
 
 ## Labels the migration and triage own
 
-`agent-safe` is set only by triage or a human. It means: criteria testable, no product or structural decision, diff expected under policy limits. The implementer treats absence as "not selectable" even if `status:ready`.
+`agent-safe` is set only by triage or a human. It means the criteria are
+testable, no product or structural decision is open, and the work fits the
+authorized autonomous scope. The implementer treats absence as "not
+selectable" even if `status:ready`.
 
 ## Failure handling
 

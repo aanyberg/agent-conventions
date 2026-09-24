@@ -4,7 +4,8 @@ node_modules/
 .planning/
 .venv/
 
-# Installer output when this repo is used as its own install target.
+# Local installs, including output from the former installer.
+.agents/
 .claude/
 .codex/
 .cursor/

@@ -13,6 +13,10 @@ All notable changes to this project are documented in this file.
 - Follow existing project dependencies and tooling instead of defaulting to
   Hatch, pnpm, barrel modules, or optional Rust support crates.
 
-### Fixed
+### Removed
 
-- Make `--replace-symlinks` replace generated-agent directory symlinks without modifying their targets.
+- Remove the package installer, package metadata and lockfile, provider-native
+  plugin manifests, publishing workflow, and bundled agent definitions. Skills
+  are now available through `npx skills` or by referencing this repository
+  directly.
+- Remove the automated validation workflow and local test harness.

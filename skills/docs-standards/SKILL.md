@@ -22,23 +22,23 @@ Load this skill when:
 - Documenting a public API, module, or behavioural change
 - Reviewing a pull request that changes documentation
 
-For **multi-file doc synchronisation** after a code change — mapping a diff to
-every affected page and maintaining release traceability — hand off to a
-documentation-sync subagent when available. The package installer provides the
-optional **conventions-docs-steward** agent for this role.
+For **multi-file doc synchronisation** after a code change, map the diff to
+every affected page and maintain release traceability. If a
+documentation-sync subagent is available in the environment, it can handle
+this work; this repository does not provide one.
 
 ## Where Documentation Lives
 
 Follow the repository's existing documentation layout. Common locations are
 listed for discovery only; they are not reasons to create or move files.
 
-| Doc | Location | Owning skill (+ optional installed agent) |
+| Doc | Location | Owning skill |
 |-----|----------|----------------------|
 | Project overview | `README.md` | docs-standards |
 | Release history | `CHANGELOG.md` | docs-standards + code-standards (versioning) |
 | System-as-is + ADRs | Existing architecture/ADR location | architecture-planning |
-| Role behaviour | `docs/roles/*.md` | docs-standards (conventions-docs-steward) |
-| Layer / locked-version tables | layer docs | docs-standards (conventions-docs-steward) |
+| Role behaviour | `docs/roles/*.md` | docs-standards |
+| Layer / locked-version tables | layer docs | docs-standards |
 | Task / backlog records | Existing task or backlog location | task-workflow, backlog-management |
 
 Keep each doc in its canonical location. Do not duplicate the same information across files — link instead.

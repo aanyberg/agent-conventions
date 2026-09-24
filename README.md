@@ -1,294 +1,56 @@
 # agent-conventions
 
-A collection of specialized agents, skills, and development guidelines for AI coding assistants.
+Portable [Agent Skills](https://agentskills.io/specification) for coding
+standards, language guidelines, testing, reviews, documentation, backlog
+management, and development workflows.
 
-This repository contains:
-
-- **`skills/` and `agent-sources/`** — Skills follow the Agent Skills
-  specification. Agent sources remain outside provider auto-discovery; the
-  installer renders them into each provider's native format and directory.
-  - **Agents** — Six specialized roles for planning, implementation, review,
-    documentation synchronization, repository research, and verification
-  - **Skills** — Focused knowledge modules covering code standards, best practices, and workflows across Python, TypeScript, and general development
-- **Instructions** — A single `AGENTS.md` file with project-level guidance that works across all supported tools
-
-These components enhance AI coding assistants by providing domain knowledge, coding conventions, and structured workflows.
+Like [Google's skills repository](https://github.com/google/skills), this repo
+keeps its skills in a single top-level [`skills/`](skills) directory. Install
+them with `npx skills`, or reference the skill files directly. We do not ship
+provider-native agents, plugins, or a separate installer.
 
 ## Repository-native by default
 
-Installing the package does not opt a repository into a particular planning or
-governance process. Skills follow the repository's existing contributor
-instructions, tooling, issue tracker, documentation layout, and Git history.
-They do not create policy files, planning hierarchies, backlogs, or ADR systems
-merely because they are installed.
+Skills follow the consuming repository's existing contributor instructions,
+tooling, tracker, documentation layout, and Git history. They do not create
+policy files, planning hierarchies, backlogs, or ADR systems merely because
+they are available.
 
-When a backlog operation is requested, `backlog-management` honors an explicit
-choice, then checks repository instructions and existing tracker structure. If
-that evidence does not identify exactly one backend, it asks whether to use
-GitHub Issues, `BACKLOG.md`, or no persistent backlog. The answer is
-conversation-scoped unless the user chooses to document it in an existing
-repository instruction file.
-
+For backlog operations, `backlog-management` follows an explicit choice or
+established repository evidence. If neither identifies a single backend, it
+asks whether to use GitHub Issues, `BACKLOG.md`, or no persistent backlog.
 Structured task files and architecture records are similarly used only when
-already established or explicitly requested. The GitHub Issues and Markdown
-backend documents remain reusable adapters rather than a mandatory operating
-model.
+already established or explicitly requested.
 
 ## Installation
 
-### Everything, one command
+Install with the [skills CLI](https://github.com/vercel-labs/skills):
 
 ```bash
-# this machine, every project — skills, agents, and global instructions
-npx github:aanyberg/agent-conventions -g
-
-# preview without writing anything
-npx github:aanyberg/agent-conventions -g --dry-run
-```
-
-Once the package is on npm the shorter `npx @anyberg/agent-conventions@latest` works identically.
-
-> **Note the spelling.** The npm scope is `@anyberg` (one `a`); the GitHub org and the Claude marketplace are `aanyberg` (two). They are separate namespaces and the handles differ — `github:aanyberg/…` and `conventions@aanyberg` are correct as written. The `github:` form needs nothing published and accepts any ref — `github:aanyberg/agent-conventions#1.1.0` pins a release.
-
-Run bare, it asks for scope and agents, prints every path it will touch, and defaults to **no**. `-y` skips the prompt but still prints the plan. Nothing global is written without the paths appearing on screen first.
-
-It writes a receipt, so `uninstall` removes exactly what was installed and nothing else:
-
-```bash
-npx github:aanyberg/agent-conventions uninstall -g
-```
-
-**Existing files are never clobbered.** Global instructions are appended inside `<!-- BEGIN/END -->` markers, so your own content survives an install and is restored byte-for-byte by an uninstall. If an instruction path, skills root, or generated-agent directory is itself a **symlink**, the installer refuses it rather than writing through the link. Other selected providers still install, and the receipt records only successful writes. `--replace-symlinks` converts the link itself to a real path, leaving its target untouched.
-
-Your project's own `AGENTS.md` is never written. That file is yours.
-
-### Skills — any agent
-
-The skills follow the [Agent Skills specification](https://agentskills.io/specification), so one copy works in every agent that reads it. Install them with the ecosystem's CLI:
-
-```bash
-# this project only
 npx skills add aanyberg/agent-conventions
+```
 
-# every project on this machine
+Select the skills and assistants you want when prompted. Preview the available
+skills, or install globally, with:
+
+```bash
+npx skills add aanyberg/agent-conventions --list
 npx skills add aanyberg/agent-conventions -g
 ```
 
-It prompts for scope and agents. To skip the prompts:
+For project installs, the CLI uses generic `.agents/skills/` for assistants
+that read it and `.claude/skills/` when Claude Code is selected. It manages the
+copies or links; this repository does not commit duplicate skill trees in
+either location. Global destinations depend on the selected assistant. Remove
+installed skills with `npx skills remove` (or `npx skills remove -g` for global
+installs).
 
-```bash
-npx skills add aanyberg/agent-conventions -a codex -a github-copilot -a opencode -y
-```
+## Reference without installing
 
-Agent flags: `claude-code`, `codex`, `github-copilot`, `opencode`, `cursor`, `gemini-cli`, and [70+ others](https://github.com/vercel-labs/skills#supported-agents).
-
-**Only two directories are ever written**, at either scope:
-
-| Path | Read by |
-| --- | --- |
-| `.agents/skills/` (or `~/.agents/skills/`) | Codex, GitHub Copilot, OpenCode, Cursor, Gemini CLI, Cline, Zed, Amp and others — this is the cross-vendor convention |
-| `.claude/skills/` (or `~/.claude/skills/`) | Claude Code, the one holdout — contains per-skill links into the above, not a second copy |
-
-Because each Claude Code entry uses a full-path symlink into the same files,
-there is no duplicate to drift. At project scope, commit `.agents/skills/` and
-gitignore `.claude/skills/`; regenerate the links after moving the project.
-
-### Agents — every target provider
-
-The installer renders the canonical [`agent-sources/`](agent-sources) corpus into each
-selected provider's native format. Generated agents are real files rather than
-symlinks because frontmatter, tool names, permissions, and even the file format
-differ by provider.
-
-| Provider | Project path | Global path |
-| --- | --- | --- |
-| Claude Code | `.claude/agents/*.md` | `~/.claude/agents/*.md` |
-| Codex | `.codex/agents/*.toml` | `~/.codex/agents/*.toml` |
-| GitHub Copilot | `.github/agents/*.agent.md` | `~/.copilot/agents/*.agent.md` |
-| OpenCode | `.opencode/agents/*.md` | `~/.config/opencode/agents/*.md` |
-| Cursor | `.cursor/agents/*.md` | `~/.cursor/agents/*.md` |
-| Gemini CLI | `.gemini/agents/*.md` | `~/.gemini/agents/*.md` |
-
-Every emitted name starts with `conventions-`. The receipt stores a digest for
-each generated file: updates refuse foreign collisions, and uninstall preserves
-any managed agent a user modified after installation.
-
-### Native plugin install
-
-Each ecosystem has its own manifest pointing at the same top-level
-[`skills/`](skills). Native plugin installation is intentionally skills-only;
-use the package installer above when provider-native agents are also required:
-
-```bash
-# Codex, Cursor, ChatGPT, Kiro, VS Code — via the Agent Plugins standard
-# (plugin.json at the repo root)
-
-claude plugin marketplace add aanyberg/agent-conventions   # Claude Code
-copilot plugin marketplace add aanyberg/agent-conventions  # GitHub Copilot CLI
-gemini extensions install aanyberg/agent-conventions       # Gemini CLI
-```
-
-Codex discovers the repo through `.codex-plugin/plugin.json`; Copilot CLI reads the same `.claude-plugin/marketplace.json` Claude Code does.
-
-### Skills — Claude Code plugin
-
-The plugin route installs skills and updates through `claude plugin update`.
-Canonical agent sources are not exposed directly because their metadata is not
-valid provider configuration; use the package installer for agents:
-
-```bash
-claude plugin marketplace add aanyberg/agent-conventions
-claude plugin install conventions@aanyberg
-```
-
-A consumer repo can commit the marketplace in `.claude/settings.json` so contributors need no per-person install at all — see [docs/CONSUMER.md](docs/CONSUMER.md).
-
-### Global Instructions
-
-`AGENTS.md` is the single source of truth. Global instructions use
-provider-specific filenames, so install the managed block with the package
-installer rather than creating symlinks:
-
-```bash
-npx github:aanyberg/agent-conventions -g -c instructions
-```
-
-The installer appends a marked block to the selected instruction files and
-preserves content outside that block. It refuses instruction-file symlinks
-unless `--replace-symlinks` is explicitly provided; replacement affects only
-the symlink itself, never its target. Use `uninstall -g` to remove only the
-managed block later.
-
-## Removing
-
-Whatever put this on your machine is what takes it off — the routes do not clean up after each other.
-
-| Installed with | Remove with |
-| --- | --- |
-| `npx github:aanyberg/agent-conventions` | `npx github:aanyberg/agent-conventions uninstall -g` (or `-p`) |
-| `npx skills add …` | `npx skills remove -g` |
-| `claude plugin install` | `claude plugin uninstall conventions@aanyberg` |
-| `claude plugin marketplace add` | `claude plugin marketplace remove aanyberg` |
-| `gemini extensions install` | see `gemini extensions --help` |
-
-### What the installer's uninstall removes
-
-It works from the receipt written at install time, so it removes **exactly** what was installed and nothing adjacent:
-
-- every skill directory it created, and the links it made into `.claude/skills/`
-- every generated agent that is still byte-identical to the installed copy;
-  modified agents are retained and reported
-- its block from each instruction file, leaving your own content byte-for-byte as it was — and deleting the file outright only if the installer created it and nothing else is in it
-- the receipt itself
-
-A skill someone else put in the same directory is left alone. That is the point of the receipt: removal is never inferred from what an install *would* have produced.
-
-### `npm uninstall` does not do this
-
-`npm uninstall` removes the package and **nothing the installer wrote**. It cannot — npm removed uninstall lifecycle scripts in v7, on the grounds that a removal has too many possible causes to give a script useful context.
-
-So if you installed the package globally, remove the content first and the package second:
-
-```bash
-npx github:aanyberg/agent-conventions uninstall -g
-npm uninstall -g @anyberg/agent-conventions
-```
-
-The other order strands the files with the tool gone. Recoverable — the receipt is still on disk and `npx` re-fetches — but avoidable.
-
-### By hand
-
-If the receipt is gone, or you would rather see exactly what is there, these are all the paths the installer ever writes. Substitute the project root for `~` if you installed with `-p`:
-
-```bash
-~/.agents/skills/          # the 17 skills — the real files
-~/.claude/skills/          # one link per skill into the above
-~/.claude/agents/          # generated Claude agents
-~/.codex/agents/           # generated Codex TOML agents
-~/.copilot/agents/         # generated Copilot agents
-~/.config/opencode/agents/ # generated OpenCode agents
-~/.cursor/agents/          # generated Cursor agents
-~/.gemini/agents/          # generated Gemini agents
-~/.agent-conventions.json  # the receipt
-```
-
-Instruction files are edited, not created wholesale, so delete only the block between the markers and leave the rest:
-
-```bash
-~/.claude/CLAUDE.md
-~/.copilot/copilot-instructions.md
-~/.codex/AGENTS.md
-~/.gemini/GEMINI.md
-```
-
-Each block is delimited by `<!-- BEGIN aanyberg/agent-conventions -->` and `<!-- END aanyberg/agent-conventions -->`. Anything outside those markers was yours.
-
-## Releasing
-
-Six manifests declare a version. Set them together, never by hand:
-
-```bash
-node scripts/bump-version.mjs 1.1.0
-git commit -am "chore: release 1.1.0"
-git tag 1.1.0 && git push origin 1.1.0
-```
-
-The bare semantic-version tag triggers [`release.yml`](.github/workflows/release.yml), which **re-runs the full suite rather than trusting merge-time checks** — an `--admin` merge bypasses required status checks as well as the approval rule, so a staged release cannot assume the PR was green. It also verifies the complete tag matches the manifests, packs the tarball and asserts it contains the skills, agents, `AGENTS.md` and the binary, then installs that exact tarball and runs a full install/uninstall round trip. Only then does it stage the package for approval.
-
-Approve the staged package once its checks complete:
-
-```bash
-npm stage list @anyberg/agent-conventions
-npm stage approve <stage-id>
-```
-
-Publishing uses [npm trusted publishing](https://docs.npmjs.com/trusted-publishers/) over OIDC: no `NPM_TOKEN` is stored anywhere, the credential is short-lived and scoped to this one workflow, and npm attaches a provenance attestation automatically.
-
-### One-time setup
-
-Neither step can be scripted from here — both need an authenticated session:
-
-1. **npm** — publish `1.0.0` manually once (`npm publish --access public`), since a trusted publisher can only be added to a package that exists. Then under the package's *Settings → Trusted publishers*, add: repository `aanyberg/agent-conventions`, workflow `release.yml`, environment `release`.
-2. **GitHub** — create an environment named `release` (*Settings → Environments*). Adding yourself as a required reviewer there puts a human approval in front of every publish, which is worth having for a public registry.
-
-Until step 1 is done, `npx @anyberg/agent-conventions` will not resolve — use the `github:` form above, which needs nothing published. Publishing buys a shorter command, a tarball fetch instead of a clone, and a provenance attestation; it does not add capability.
-
-There is deliberately **no `postinstall` hook**. `npm install` does nothing on its own; the installer is run explicitly.
-
-That is not only a matter of taste. `npm uninstall` removes the package and **nothing the installer wrote** — not the skills, not the instruction blocks, not the receipt — and it cannot, because npm removed uninstall lifecycle scripts in v7 ("there's no clear way to currently give the script enough context to be useful"). An auto-installing `postinstall` would therefore be a one-way door: files written into `$HOME` with no supported mechanism to remove them. The explicit installer plus a receipt is the only arrangement here that fully reverses itself.
-
-See [Removing](#removing) for how to take any of this back off.
-
-## Validation
-
-Every change is gated by a validation suite. It parses the same files Claude Code
-parses at load time — so a failure means the plugin would load wrong — and checks each
-skill against the [Agent Skills specification](https://agentskills.io/specification)
-so the single copy stays installable in every other agent.
-
-```bash
-npm test
-```
-
-It needs no API access or GitHub auth — `gh` is stubbed.
-`.github/workflows/validate.yml` gates every pull request on Linux, and repeats the
-suite on macOS after merge to `main` as a canary.
-Supported runtimes and the per-provider agent-file contracts are documented in
-[docs/COMPATIBILITY.md](docs/COMPATIBILITY.md).
-
-What it checks:
-
-| Area | Checks |
-| --- | --- |
-| Release | the version bump sets all six manifests together, refuses a non-semver input without writing, is idempotent, and leaves every other field and the file formatting untouched. A separate test asserts the six currently agree, so drift fails a PR rather than a release |
-| Installer | the CLI runs end to end against a throwaway `HOME`: both scopes, symlink and copy modes, idempotent reinstall, and an uninstall that restores a pre-existing file byte-for-byte and leaves a foreign skill in the same directory alone. The symlink guard has its own tests — the one failure mode here that destroys data rather than annoying someone |
-| Install manifests | the four ecosystem manifests parse, declare the same version, and point at the same `skills/`; `plugin.json` matches the Agent Plugins name grammar and carries no key outside its schema, which sets `additionalProperties: false` so an extra key invalidates the file rather than being ignored |
-| Manifests | `marketplace.json` and `plugin.json` parse, agree on descriptions, use semver, and every declared `source` resolves to a real plugin. Plugin identity comes from the manifest pair, not the directory name — the root plugin is `conventions` while its directory is the repo itself |
-| Skills | frontmatter has `name` and `description`, `name` matches the directory, names are unique, descriptions fit the loader budget, and every key is one the Agent Skills spec permits — `version` is not one of them, it belongs inside `metadata` |
-| Agents | canonical names are package-prefixed; abstract capabilities, access, model tier, effort, and turn limits are valid; read-only roles cannot request writes; every provider renderer preserves identity and behavior |
-| References | relative markdown links resolve and every skill or agent named in prose exists |
-| Workflow portability | no policy files or policy scripts are shipped; backlog selection asks only when explicit instructions and repository evidence remain ambiguous; structured tasks and architecture records require existing use or explicit intent |
-| Cross-agent portability | the repo ships one copy of each skill, so no skill or agent body may depend on a single vendor: no interpolated `${CLAUDE_*}` variable, no vendor component directory (`.claude/skills/`, `.cursor/rules/`, …), no vendor instruction file (`CLAUDE.md`, `copilot-instructions.md`), and no tool named from one agent's vocabulary. Naming a vendor directory as somewhere *not* to write stays legal — `task-workflow` does exactly that with `~/.claude` and `~/.copilot`. Each rule is pinned to a sample it must catch and a sample it must ignore, so a regex that rots fails loudly instead of passing on everything |
-
-Adding a skill or agent needs no test changes — the suite discovers files dynamically
-and creates a subtest per file, so each one fails independently with its own path.
+You can reference this repository manually: point your assistant at a
+`SKILL.md` under [`skills/`](skills) and any supporting files in that skill's
+directory. You can also reference [`AGENTS.md`](AGENTS.md) from your existing
+project instructions if you want its general guidance.
+References do not automatically install skills or merge instructions; the
+assistant must be able to read the referenced files. See the
+[consumer guide](docs/CONSUMER.md) for an example and migration notes.

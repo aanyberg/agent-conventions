@@ -1,76 +1,67 @@
-# Consuming this repo as a plugin
+# Consuming this repository
 
-This repo publishes a Claude Code plugin marketplace (`aanyberg`) with one plugin, `conventions`. The repository root *is* the plugin, so its portable [`skills`](../skills) sit at the top level. Canonical [`agent-sources`](../agent-sources) are rendered only by the package installer so provider-specific metadata never leaks into another provider. Consumer repos load plugin skills directly — no copying or symlinking into `~/.claude`.
+The supported installation route is [`npx skills`](https://github.com/vercel-labs/skills).
+Run the command from the project where you want the skills, or use `-g` for a
+machine-wide installation:
 
-## `.claude/settings.json`
-
-Add the marketplace and enable the plugin in the consumer repo's `.claude/settings.json`:
-
-```json
-{
-  "extraKnownMarketplaces": {
-    "aanyberg": {
-      "source": {
-        "source": "github",
-        "repo": "aanyberg/agent-conventions"
-      }
-    }
-  },
-  "enabledPlugins": {
-    "conventions@aanyberg": true
-  }
-}
+```bash
+npx skills add aanyberg/agent-conventions
 ```
 
-`aanyberg/agent-conventions` is public, so no additional credentials are needed to reach it.
+Select your assistants when prompted. The CLI manages the installed copies
+and removes them with `npx skills remove`; this repository does not install
+agents, plugins, or global instructions.
 
-> **Migrating from `lahnvik`:** the marketplace was renamed from `lahnvik` to `aanyberg`. GitHub redirects the old
-> repository name, but marketplace keys are not redirected — change `conventions@lahnvik` to `conventions@aanyberg`
-> in `enabledPlugins`, and rename the `extraKnownMarketplaces` key to match, or the plugin will stop resolving.
+## Skill locations
 
-## Not using Claude Code?
+The source of truth is [`skills/`](../skills), just as in Google's skills repo.
+For project installs, `npx skills` places skills in these locations according
+to the assistants you select:
 
-The skills in this repo are portable — [`skills/`](../skills) follows the [Agent Skills specification](https://agentskills.io/specification), so Codex, GitHub Copilot, OpenCode, Cursor and Gemini CLI can all load the same copy. Agents have no equivalent cross-provider file specification; the package installer renders the canonical definitions into each provider's native format and path. The rest of this document covers the Claude Code plugin route specifically; for other providers see **Agents — every target provider** in the root [README.md](../README.md).
+| Assistant | Project location |
+| --- | --- |
+| Assistants using the shared convention | `.agents/skills/<name>/SKILL.md` |
+| Claude Code | `.claude/skills/<name>/SKILL.md` |
+
+The CLI manages the links or copies. Do not maintain a second skill corpus in
+either directory in this repository. Global destinations depend on the
+selected assistant; use `npx skills add aanyberg/agent-conventions -g` to let
+the CLI place them. This repository does not include the plugin marketplaces
+in Google's `.agents/plugins/` or `.claude-plugin/`: those provide additional
+installation routes, contrary to this repo's skills-only distribution.
+
+## Reference without installing
+
+Instead of installing, tell your assistant which skill to read from this
+repository. For example, in an existing project instruction file:
+
+```markdown
+For code reviews, read the `code-review` skill at
+https://github.com/aanyberg/agent-conventions/blob/main/skills/code-review/SKILL.md
+and follow its guidance when reviewing changes.
+```
+
+Use a pinned Git ref in the URL if you need stable guidance. If a skill links
+to supporting files, make those files accessible too. The assistant must be
+able to access the referenced repository; a link by itself does not load a
+skill into an assistant's skill registry. You can likewise reference the
+repository's [`AGENTS.md`](../AGENTS.md) if you want its general instructions,
+without replacing your own project's instructions.
+
+If you previously installed this repository through its old package
+installer or a native plugin, remove that installation separately before
+using `npx skills`. The new CLI cannot remove files it did not install.
 
 ## Repository-native behavior
 
-Installing or enabling the plugin does not impose its planning workflow.
-Skills follow the consumer repository's existing instructions and
-conventions. They create no policy, backlog, task hierarchy, architecture
-record, branch, or changelog solely because the plugin is present.
+The skills follow the consuming repository's existing conventions and
+workflows. They do not create a policy, backlog, task hierarchy, architecture
+record, branch, or changelog solely because they are available.
 
-This is the right mode for repositories that already have their own tracker
-and contribution process, and for new repositories that only want the
-language, testing, review, and documentation guidance.
-
-## Choosing backlog tracking
-
-The backlog skill does not use a central configuration file. For a backlog
-operation it checks, in order:
-
-1. The backend explicitly named in the request.
-2. Repository instructions naming a tracker.
-3. An established `BACKLOG.md` or GitHub Issues work-item structure, including
-   repository-specific labels, fields, projects, or statuses.
-
-If those signals do not identify one backend, the agent asks whether to use
-GitHub Issues, `BACKLOG.md`, or no persistent backlog. A GitHub remote by itself
-does not select GitHub Issues. To make a choice permanent, document it in the
-repository's existing `AGENTS.md` or contributing guide.
-
-Structured task files and ADRs are independent. The corresponding skills follow
-established repository requirements, including required ADRs. They establish a
-new task or ADR convention only after an explicit request and confirmation.
-
-## Local setup (one-time, per machine)
-
-```bash
-claude plugin marketplace add aanyberg/agent-conventions
-claude plugin install conventions@aanyberg
-```
-
-If the consumer repo already commits the `.claude/settings.json` above, `claude plugin marketplace add` runs automatically when the repo is trusted, and `claude plugin install` is the only manual step.
-
-## Fallback
-
-If a session's environment can't reach `aanyberg/agent-conventions` on GitHub (e.g. a cloud sandbox without private-repo proxy access), the marketplace won't load. There is currently no sync script in this repo for that case — see the note in the root [README.md](../README.md) before scripting a workaround.
+For a backlog operation, `backlog-management` follows an explicit selection,
+then repository instructions, then established `BACKLOG.md` or GitHub Issues
+structure. If those signals do not identify one backend, it asks whether to
+use GitHub Issues, `BACKLOG.md`, or no persistent backlog. A GitHub remote
+alone does not select GitHub Issues. Structured tasks and ADRs similarly
+follow existing requirements, including required ADRs. Establish a new task or
+ADR convention only after an explicit request and confirmation.

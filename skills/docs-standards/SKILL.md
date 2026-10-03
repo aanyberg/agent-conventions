@@ -17,7 +17,7 @@ to follow this skill.
 Load this skill when:
 
 - Writing or editing `.md` files (README, guides, runbooks)
-- Adding a `CHANGELOG.md` entry or preparing release notes
+- Adding a changelog fragment under `changelog/` or preparing release notes
 - Creating or updating role docs (`docs/roles/*.md`) or layer docs
 - Documenting a public API, module, or behavioural change
 - Reviewing a pull request that changes documentation
@@ -35,7 +35,8 @@ listed for discovery only; they are not reasons to create or move files.
 | Doc | Location | Owning skill |
 |-----|----------|----------------------|
 | Project overview | `README.md` | docs-standards |
-| Release history | `CHANGELOG.md` | docs-standards + code-standards (versioning) |
+| Unreleased changes | `changelog/` (one fragment per change) | docs-standards |
+| Release history | `CHANGELOG.md` (assembled from fragments at release) | docs-standards + code-standards (versioning) |
 | System-as-is + ADRs | Existing architecture/ADR location | architecture-planning |
 | Role behaviour | `docs/roles/*.md` | docs-standards |
 | Layer / locked-version tables | layer docs | docs-standards |
@@ -60,10 +61,27 @@ Keep each doc in its canonical location. Do not duplicate the same information a
 
 ## Changelog format
 
-Preserve the existing changelog and release conventions. If the user requests
-a new changelog and the repository has no format, recommend *Keep a Changelog*
-with Semantic Versioning. Determine the version source of truth from the
-repository's release configuration.
+The changelog convention is one fragment file per change in
+`<project>/changelog/`.
+
+- If `<project>/changelog/` exists, follow its `README.md` for naming,
+  categories, size limit, and release steps.
+- If it does not exist and the user wants a changelog, create
+  `<project>/changelog/` with a `README.md` that defines those rules. Do not
+  use another directory name.
+- Never edit `CHANGELOG.md` for unreleased work. Add a fragment instead, and
+  do not append to `[Unreleased]`.
+- `CHANGELOG.md` is written only when a release is cut, assembled from the
+  fragments.
+- Keep fragments short; detail belongs in the PR body.
+- Grep changelog archives; never read them whole.
+
+Fragment categories are the *Keep a Changelog* headings: `Added`, `Changed`,
+`Fixed`, `Removed`, `Deprecated`, `Security`. Versions follow Semantic
+Versioning. Determine the version source of truth from the repository's
+release configuration.
+
+The assembled release section in `CHANGELOG.md` looks like this:
 
 ```markdown
 ## [1.4.0] - 2025-01-30
@@ -73,9 +91,8 @@ repository's release configuration.
 - ...
 ```
 
-- Group entries under `Added`, `Changed`, `Fixed`, `Removed`, `Deprecated`, `Security`.
-- Add an entry **only when public or observable behaviour changes** (mirrors **task-workflow** merge-readiness step 5).
-- Bump the version and update `CHANGELOG.md` in the same commit that cuts the release (**code-standards** → Semantic Versioning).
+- Add a fragment **only when public or observable behaviour changes** (mirrors **task-workflow** merge-readiness step 5).
+- The release commit assembles the `changelog/` fragments into `CHANGELOG.md`, deletes them, then bumps the version (**code-standards** → Semantic Versioning).
 
 ## Suggested role doc layout
 
@@ -99,8 +116,8 @@ Rules:
 Treat stale documentation like a failing test and fix affected docs in the
 same change:
 
-- A behavioural change updates the affected page and updates `CHANGELOG.md`
-  only when the repository's existing conventions require it.
+- A behavioural change updates the affected page and adds a `changelog/`
+  fragment only when the repository's existing conventions require it.
 - A structural change updates the repository's existing architecture record.
 - Missing or outdated docs are **Documentation debt**. Track them in the
   repository's existing work system; use **backlog-management** when the user

@@ -97,7 +97,7 @@ until each applicable row has current-session evidence:
 | 2 | Tests cover changed behavior | Relevant test command and result |
 | 3 | Lint and type checks pass | Repository-configured commands and results |
 | 4 | Pre-commit passes | Configured hooks, or N/A when absent |
-| 5 | User-facing docs and changelog updated | Diff, or N/A under repository conventions |
+| 5 | User-facing docs updated and `changelog/` fragment added | Diff, or N/A under repository conventions |
 | 6 | Version handled | Repository release policy, or N/A |
 | 7 | Task summary appended | Summary reflects the delivered change |
 | 8 | Leftovers recorded | Selected backlog IDs, repository-native records, or none |

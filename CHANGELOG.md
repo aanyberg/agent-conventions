@@ -13,6 +13,10 @@ All notable changes to this project are documented in this file.
 - Follow existing project dependencies and tooling instead of defaulting to
   Hatch, pnpm, barrel modules, or optional Rust support crates.
 
+- Make `changelog/` fragments the changelog convention in `docs-standards`:
+  one fragment per change, with `CHANGELOG.md` assembled only when a release
+  is cut. `task-workflow` merge readiness now asks for a fragment.
+
 ### Removed
 
 - Remove the package installer, package metadata and lockfile, provider-native

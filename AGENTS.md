@@ -28,6 +28,10 @@ no persistent backlog. Never silently switch backends after a failure.
 present or explicitly requested. Backlog tracking is independent.
 **Git:** Follow repository documentation and history; use the skill's
 Conventional Commit and branch formats only as fallbacks.
+**Git snapshots:** Commit every stable, working state to Git as a snapshot, so
+there is always a known-good point to recover from. Whenever the code is in a
+verified working state (builds, tests pass, feature works), make a commit
+before moving on to the next change.
 **Architecture:** Follow existing decision-record conventions, including
 required ADRs. Create a new architecture/ADR convention or location only after
 an explicit request and confirmation.

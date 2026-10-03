@@ -17,6 +17,9 @@ All notable changes to this project are documented in this file.
   one fragment per change, with `CHANGELOG.md` assembled only when a release
   is cut. `task-workflow` merge readiness now asks for a fragment.
 
+- Add a Git snapshot rule to `AGENTS.md` and `git-conventions`: commit every
+  verified working state before moving on to the next change.
+
 ### Removed
 
 - Remove the package installer, package metadata and lockfile, provider-native

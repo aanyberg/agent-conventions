@@ -26,6 +26,14 @@ Suggested types: `feat`, `fix`, `chore`, `docs`, `refactor`, and `test`.
 Keep the summary lowercase after the colon, omit the final period, and use `!`
 for a breaking change. Keep each commit focused on one logical change.
 
+### Snapshots
+
+Commit every stable, working state as a snapshot, so there is always a
+known-good point to recover from. Whenever the code is in a verified working
+state (builds, tests pass, feature works), commit on the working branch before
+moving on to the next change. Do not start a risky or wide-reaching edit on
+top of uncommitted working changes.
+
 ## 3. Branch fallback
 
 Use:

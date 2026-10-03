@@ -1,6 +1,6 @@
 ---
 name: test-driven-development
-description: Use when the user requests test-driven development or the repository already follows a red-green-refactor workflow.
+description: Use when implementing behaviour that has approved scenarios from behavior-spec, when the user requests test-driven development, or when the repository already follows a red-green-refactor workflow.
 ---
 
 # Test-Driven Development (TDD)
@@ -15,10 +15,17 @@ Write the test first. Watch it fail. Write minimal code to pass.
 
 ## When to Use
 
-Use TDD when the user requests it, the repository documents it, or an existing
-task explicitly requires a red-green-refactor loop. Otherwise follow the
-repository's normal testing workflow and still add appropriate regression
+TDD is the default for new behaviour. It is stage 3 of the pipeline
+**value-gate** -> **behavior-spec** -> **test-driven-development**: once
+scenarios are approved, implement them through the loop below.
+
+Also use TDD when the user requests it, the repository documents it, or an
+existing task explicitly requires a red-green-refactor loop. Otherwise follow
+the repository's normal testing workflow and still add appropriate regression
 coverage for changed behavior.
+
+New behaviour with no approved scenarios is not ready for TDD. Load
+**behavior-spec** first, or **value-gate** if its value has not been agreed.
 
 Typical exceptions even in a TDD project are generated code, configuration-only
 changes, and disposable prototypes.
@@ -30,6 +37,21 @@ NO PRODUCTION CODE WITHOUT A FAILING TEST FIRST
 ```
 
 While using TDD, do not write production behavior before its failing test.
+
+## From scenarios to tests
+
+When approved scenarios exist, work through them one at a time:
+
+1. Turn the scenario into one acceptance test at the outermost boundary the
+   repository's tests can reach. `Given` is the setup, `When` the action,
+   `Then` the assertions. Name the test after the scenario.
+2. Watch it fail because the behaviour is missing.
+3. Drive the implementation with the Red-Green-Refactor loop below, adding
+   smaller tests as the design needs them, until the acceptance test passes.
+4. Move to the next scenario.
+
+Do not change a scenario to make a test pass. If one proves wrong or
+incomplete, take it back to the human through **behavior-spec**.
 
 ## Red-Green-Refactor
 
@@ -105,6 +127,7 @@ step before continuing.
 
 Before marking work complete:
 
+- [ ] Every approved scenario has a passing acceptance test
 - [ ] Every new function/method has a test
 - [ ] Watched each test fail before implementing
 - [ ] Each test failed for expected reason (feature missing, not typo)

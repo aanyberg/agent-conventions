@@ -29,6 +29,10 @@ use.
 Do not migrate legacy task or architecture files automatically. If a migration
 would help, describe the affected paths and obtain confirmation first.
 
+New behaviour follows the pipeline **value-gate** -> **behavior-spec** ->
+**test-driven-development**, with or without task files. Bug fixes,
+refactors, chores, and documentation-only changes skip the first two stages.
+
 ## 2. Structured task lifecycle
 
 Preserve an existing task layout. If the user explicitly requests structured
@@ -61,6 +65,12 @@ and item are already selected, claim the item in the same step.
 ## Goal
 One paragraph: what and why.
 
+## Value                     # new behaviour only; from value-gate
+Beneficiary, problem, observable change, existing coverage, and verdict.
+
+## Scenarios                 # new behaviour only; from behavior-spec
+Approved Given/When/Then scenarios.
+
 ## Acceptance Criteria
 - [ ] Criterion one
 - [ ] Criterion two
@@ -83,7 +93,9 @@ Use the repository's existing branch format. If none exists,
 selected backend and repository convention use one.
 
 Interactive work refines acceptance criteria with the user until they are
-specific and testable. Autonomous work copies criteria from the assigned item
+specific and testable. For new behaviour, the approved scenarios are the
+acceptance criteria, and a task is not promoted to active without a recorded
+go in `## Value`. Autonomous work copies criteria from the assigned item
 without silently changing scope.
 
 ## 4. Structured merge-readiness gate
@@ -94,7 +106,7 @@ until each applicable row has current-session evidence:
 | # | Item | Evidence |
 |---|---|---|
 | 1 | Acceptance criteria met | Each criterion checked against the implementation |
-| 2 | Tests cover changed behavior | Relevant test command and result |
+| 2 | Tests cover changed behavior | Relevant test command and result; one passing acceptance test per approved scenario |
 | 3 | Lint and type checks pass | Repository-configured commands and results |
 | 4 | Pre-commit passes | Configured hooks, or N/A when absent |
 | 5 | User-facing docs updated and `changelog/` fragment added | Diff, or N/A under repository conventions |

@@ -6,6 +6,7 @@
 |---------|-------|
 | Listing, creating, claiming, releasing, de-duplicating work items; checking what is in flight; any "add to backlog" or "update status" | `backlog-management` |
 | Creating/managing tasks, checking merge readiness, running autonomously as an agent or subagent | `task-workflow` |
+| A new feature, capability, or behaviour change is proposed | `value-gate`, then `behavior-spec`, then `test-driven-development` |
 | Architectural decisions, new services/modules, tech choices | `architecture-planning` |
 | Committing, branching, PRs, worktrees, git operations | `git-conventions` |
 | Reviewing a PR or branch, acting as independent reviewer | `code-review` |
@@ -26,6 +27,13 @@ no persistent backlog. Never silently switch backends after a failure.
 
 **Tasks:** Structured `.planning/tasks/` files are used only when already
 present or explicitly requested. Backlog tracking is independent.
+**New behaviour:** Runs through three stages in order: `value-gate` (a human
+decides whether it is worth building, exploring first when the value is
+unknown), `behavior-spec` (Given/When/Then scenarios become the acceptance
+criteria and can be recorded as a backlog item), then
+`test-driven-development` (a failing test per scenario before any production
+code). Bug fixes,
+refactors, chores, and documentation-only changes skip the first two.
 **Git:** Follow repository documentation and history; use the skill's
 Conventional Commit and branch formats only as fallbacks.
 **Architecture:** Follow existing decision-record conventions, including

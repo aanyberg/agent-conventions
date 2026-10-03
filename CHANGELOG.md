@@ -4,7 +4,22 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 
+### Added
+
+- Add the `value-gate` and `behavior-spec` skills. New behaviour now runs
+  through value-gate (a human go/no-go, asked through interactive prompts with
+  suggested answers and a free-text option), behavior-spec (Given/When/Then
+  scenarios as acceptance criteria), then test-driven-development. When the
+  value is unknown, value-gate offers an explore verdict that settles it with
+  a scoped check or disposable spike. Approved scenarios can be recorded as a
+  backlog item through `backlog-management`.
+
 ### Changed
+
+- Make `test-driven-development` the default for new behaviour with approved
+  scenarios: each scenario becomes a failing acceptance test before any
+  production code. `task-workflow` task files gain `## Value` and
+  `## Scenarios` sections.
 
 - Remove the central workflow policy and automatic backend detection. Skills
   now follow repository evidence, and backlog management asks the user when

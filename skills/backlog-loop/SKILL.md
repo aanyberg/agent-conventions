@@ -61,8 +61,8 @@ Arguments of this invocation: `$ARGUMENTS`
 
 1. Run `${CLAUDE_SKILL_DIR}/scripts/preflight.sh --probes $ARGUMENTS`. Run every
    printed line as its own Bash call. If one is denied or needs approval, stop
-   and tell the user which permission rule is missing (see `README.md`,
-   "Permissions for unattended runs").
+   and tell the user which permission rule is missing (see
+   `reference/setup.md`, "Permissions for unattended runs").
 2. Run `${CLAUDE_SKILL_DIR}/scripts/preflight.sh --session ${CLAUDE_SESSION_ID} $ARGUMENTS`.
    It runs no test suite: whether the base branch is green is read from CI.
    If it exits non-zero, show its output unchanged and stop. On success it

@@ -22,6 +22,15 @@ asks whether to use GitHub Issues, `BACKLOG.md`, or no persistent backlog.
 Structured task files and architecture records are similarly used only when
 already established or explicitly requested.
 
+## Skills with their own documentation
+
+Most skills are a single `SKILL.md`. The larger ones ship a README that
+explains what they do, how to use them, and how they work inside:
+
+| Skill | What it does |
+|---|---|
+| [`backlog-loop`](skills/backlog-loop/README.md) | Works through a whole backlog unattended: themed, CI-gated pull requests, merged and verified, with blocked items reported. |
+
 ## Installation
 
 Install with the [skills CLI](https://github.com/vercel-labs/skills):

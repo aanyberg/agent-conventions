@@ -4,7 +4,7 @@
 #
 #   verify-batch.sh <batch> pre-merge    PR open, up to date with base, checks green
 #   verify-batch.sh <batch> merged       the PR is merged on GitHub
-#   verify-batch.sh <batch> post-merge   the base branch still passes test, lint, build
+#   verify-batch.sh <batch> post-merge   CI on the base branch is green for the merge
 #   verify-batch.sh <batch> rebase       bring the PR branch up to date with base
 set -u
 BL_SELF=verify-batch
@@ -58,7 +58,7 @@ case "$mode" in
       exit 0
     fi
     checks="$(bl_pr_checks "$pr")"
-    if [ "$checks" != "green" ] && ! { [ "$checks" = "none" ] && [ "$(bl_cfg ci)" = "none" ]; }; then
+    if [ "$checks" != "green" ]; then
       st record recheck "$b"
       echo "NOT GREEN: checks on PR #$pr are $checks. Run next.sh."
       exit 0
@@ -97,14 +97,49 @@ case "$mode" in
     [ "$current" = "$base" ] || bl_die "the main checkout is on '$current', expected '$base'. Check out $base and run this again."
     git -C "$BL_ROOT" pull -q --ff-only origin "$base" >/dev/null 2>&1 ||
       bl_die "could not fast-forward $base in the main checkout. Make it clean and run this again."
-    if failures="$(cd "$BL_ROOT" && bl_run_checks)"; then
-      st record post-merge "$b" pass
-      echo "VERIFIED: PR #$pr is merged and $base passes test, lint and build. Run next.sh."
-    else
-      st record post-merge "$b" fail "$(printf '%s' "$failures" | tr '\n' ' ')"
-      echo "BASE RED: $base fails after merging PR #$pr: $failures"
-      echo "Run next.sh. The merge will be reverted."
-    fi
+    # The base branch is judged by its CI, on the merge commit. Nothing is run locally.
+    sha="$(git -C "$BL_ROOT" rev-parse "refs/remotes/origin/$base" 2>/dev/null)"
+    wait_min="$(bl_limit ci_wait_minutes)"
+    deadline=$(($(bq '.ci_started_at // 0') + ${wait_min:-45} * 60))
+    end=$(($(date +%s) + ${BACKLOG_LOOP_SLICE_SECONDS:-100}))
+    while :; do
+      result="$(bl_commit_checks "$(bl_cfg repo)" "$sha")"
+      bl_lock_touch
+      case "$result" in
+        green)
+          st record post-merge "$b" pass
+          echo "VERIFIED: PR #$pr is merged and CI is green on $base. Run next.sh."
+          exit 0
+          ;;
+        red*)
+          st record post-merge "$b" fail "CI failed on $base: ${result#red }"
+          echo "BASE RED: CI fails on $base after merging PR #$pr: ${result#red }"
+          echo "Run next.sh. The merge will be reverted."
+          exit 0
+          ;;
+        none)
+          # No CI on pushes to the base branch. The PR was green and contained
+          # the base tip, so its result stands once CI had time to start.
+          if [ "$(bq '.ci_polls')" -ge 1 ]; then
+            st record post-merge "$b" pass
+            echo "VERIFIED: PR #$pr is merged. No CI runs on $base itself; the green PR result stands. Run next.sh."
+            exit 0
+          fi
+          ;;
+      esac
+      if [ "$(bl_now)" -ge "$deadline" ]; then
+        st record post-merge "$b" pass
+        bl_log "post-merge: CI on $base did not finish within ${wait_min:-45} minutes for batch $b; accepted on the green PR result"
+        echo "VERIFIED: PR #$pr is merged. CI on $base did not finish in time; the green PR result stands. Run next.sh."
+        exit 0
+      fi
+      if [ $(($(date +%s) + ${BACKLOG_LOOP_POLL_SECONDS:-20})) -gt "$end" ]; then
+        st record post-merge "$b" poll
+        echo "PENDING: CI on $base is still running for the merge of PR #$pr. Run this command again."
+        exit 0
+      fi
+      sleep "${BACKLOG_LOOP_POLL_SECONDS:-20}"
+    done
     ;;
 
   rebase)

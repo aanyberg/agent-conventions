@@ -144,12 +144,12 @@ git checkout -q -b other
 out="$("$S/preflight.sh" --session dry 2>&1)"
 assert_contains "wrong branch is reported" "the checkout is on 'other', not on the base branch 'main'" "$out"
 git checkout -q main
-sed -i.bak '/^- test:/d' CLAUDE.md && rm -f CLAUDE.md.bak
-git commit -q -am "drop test config" && git update-ref refs/remotes/origin/main HEAD
+sed -i.bak 's/^- merge-method:.*/- merge-method: fastest/' CLAUDE.md && rm -f CLAUDE.md.bak
+git commit -q -am "bad config" && git update-ref refs/remotes/origin/main HEAD
 out="$("$S/preflight.sh" --session dry 2>&1)"
-assert_contains "missing config is reported" "FAIL  Config: test command could not be detected" "$out"
+assert_contains "bad config is reported" "FAIL  Config: merge-method must be squash, merge or rebase" "$out"
 assert_contains "the fix shows the exact section" "## Backlog loop" "$out"
-assert_contains "the section lists the keys" "- test: <command>" "$out"
+assert_contains "the section lists the keys" "- merge-method: squash" "$out"
 out="$("$S/preflight.sh" --session dry --resume 2>&1)"
 assert_contains "--resume without a run fails" "there is no unfinished run" "$out"
 
@@ -171,10 +171,7 @@ new_repo
 out="$("$S/preflight.sh" --session dry --gitignore 2>&1)"
 assert_contains "--gitignore writes .gitignore" ".planning/backlog-loop/" "$(cat .gitignore)"
 assert_eq "probes never run the test suite" "git status --short|gh auth status|" "$("$S/preflight.sh" --probes | tr '\n' '|')"
-touch .break-base
-git add .break-base && git commit -q -m "locally broken, CI green" && git update-ref refs/remotes/origin/main HEAD
-out="$("$S/preflight.sh" --session dry 2>&1)"
-assert_contains "preflight runs no local tests: a locally failing suite does not stop it" " 0 failed" "$out"
+assert_eq "no test command is configured or stored" "null" "$(jq -r '.test // "null"' "$DIR/config.json")"
 
 # ------------------------------------------------------------------------------------
 echo "scenario: flaky CI passes after one rerun"
@@ -288,11 +285,11 @@ echo "scenario: base branch red after a merge"
 new_repo
 item_snippet() {
   printf "echo 'feature %s' > feature-%s.txt;" "$1" "$1"
-  [ "$1" != "1" ] || printf " touch .break-base;"
+  [ "$1" != "1" ] || printf " touch .ci-fail-base;"
 }
 start "$SPLIT" && run_until revert_batch
 assert_eq "the batch to revert is batch 1" "1" "$TARGET"
-assert_contains "the action explains why" "base branch red after merge" "$(printf '%s' "$OUT" | jq -r '.summary')"
+assert_contains "the action explains why" "CI failed on main: ci" "$(printf '%s' "$OUT" | jq -r '.summary')"
 url="$(gh pr revert "$(bq 1 '.pr')" --title "revert: backlog batch 1" --body "red")"
 rpr="${url##*/}"
 "$S/state.sh" record revert-opened 1 "$rpr"
@@ -308,7 +305,7 @@ assert_eq "its items are blocked" "blocked,blocked" "$(jq -r '[.items[] | select
 next
 assert_eq "the loop halts" "halt" "$ACTION"
 assert_contains "the halt names the revert" "reverted in PR #$rpr" "$(printf '%s' "$OUT" | jq -r '.summary')"
-assert_eq "the base branch no longer has the breaking change" "" "$(git ls-tree -r --name-only origin/main | grep -x '.break-base' || true)"
+assert_eq "the base branch no longer has the breaking change" "" "$(git ls-tree -r --name-only origin/main | grep -x '.ci-fail-base' || true)"
 assert_contains "the report says why the loop halted" "Backlog loop halted: base branch was red" "$("$S/report.sh")"
 assert_eq "issue 1 is labelled blocked" "true" "$(jq '.issues[] | select(.number == 1) | .labels | index("blocked") != null' "$GH")"
 

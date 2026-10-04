@@ -353,9 +353,6 @@ cmd_worker_prompt() {
   BL_T_THEME="$(bq "$b" '.theme')"
   BL_T_BRANCH="$(bq "$b" '.branch')"
   BL_T_BASE="$(bl_cfg base_branch)"
-  BL_T_TEST="$(bl_cfg test)"
-  BL_T_LINT="$(bl_cfg lint)"
-  BL_T_BUILD="$(bl_cfg build)"
   BL_T_PR="$(bq "$b" '.pr // "none"')"
   BL_T_ERROR="$(bq "$b" '.last_error // "none"')"
   BL_T_ITEM="$item"
@@ -874,7 +871,8 @@ record_premerge_ok() {
 record_merged() {
   require_batch "$1"
   require_phase "$1" merge ci rebase post-merge
-  upd --argjson b "$1" --arg c "${2:-}" "$JQ_DEFS"'set_batch($b; .phase = "post-merge" | .merge_commit = $c)'
+  upd --argjson b "$1" --arg c "${2:-}" --argjson now "$(bl_now)" "$JQ_DEFS"'
+    set_batch($b; .phase = "post-merge" | .merge_commit = $c | .ci_started_at = $now | .ci_polls = 0)'
   bl_log "merged batch=$1 commit=${2:-unknown}"
 }
 
@@ -895,6 +893,10 @@ record_post_merge() {
   require_batch "$b"
   require_phase "$b" post-merge
   pr="$(bq "$b" '.pr')"
+  if [ "$result" = "poll" ]; then
+    upd --argjson b "$b" "$JQ_DEFS"'set_batch($b; .ci_polls += 1)'
+    return 0
+  fi
   if [ "$result" = "pass" ]; then
     upd --argjson b "$b" "$JQ_DEFS"'
       set_items($b; .status = "merged" | .pending = null) | set_batch($b; .status = "merged" | .phase = null)'

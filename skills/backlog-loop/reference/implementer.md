@@ -23,11 +23,9 @@ Rules that always apply:
 - No new dependency unless nothing in the repository fits. Follow the
   conventions already in the codebase and in CLAUDE.md or AGENTS.md.
 - Do not delete, skip or weaken existing tests to get green.
-- Before you report, run these in your worktree and make them pass:
-  - test: `{{TEST}}`
-  - lint: `{{LINT}}`
-  - build: `{{BUILD}}`
-  A command shown as `none` is not configured; skip it.
+- Do not run the test suite, the linter or the build. Testing happens only in
+  the repository's CI, on the pull request. Write the tests your change needs,
+  read the code carefully, and push; CI is the judge.
 - Push with `git push origin {{BRANCH}}`. Do not open a pull request.
 <!-- END common -->
 
@@ -140,8 +138,8 @@ git checkout -B {{BRANCH}} origin/{{BRANCH}}
 git merge origin/{{BASE}}
 ```
 
-Resolve every conflict so that both sides keep their intent, run test, lint
-and build, commit the merge, and push. You get one attempt. If the conflict
+Resolve every conflict so that both sides keep their intent, commit the merge,
+and push. You get one attempt. If the conflict
 cannot be resolved cleanly, abort the merge and report `failed`.
 <!-- END conflict -->
 
@@ -166,7 +164,7 @@ git revert --no-commit <sha> [<sha> ...]
 git commit -m "revert: drop backlog item {{ITEM}} from batch {{BATCH}}" -m "Backlog-Drop: {{ITEM}}"
 ```
 
-Run test, lint and build, then push. Do not change anything else.
+Push. Do not change anything else.
 <!-- END drop -->
 
 <!-- BEGIN report -->
@@ -184,7 +182,6 @@ ITEMS:
 - <id>: unclear: <the precise question>
 - <id>: blocker: <what is missing>
 - <id>: failed: <what went wrong>
-CHECKS: test=<pass|fail> lint=<pass|fail> build=<pass|fail>
 NOTES: <anything the main agent must know, one or two lines>
 ```
 <!-- END report -->

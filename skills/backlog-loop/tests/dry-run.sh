@@ -166,7 +166,7 @@ ISO 8601, because the fixture has no locale handling to build on.
 
 ## Evidence
 
-- `checks.sh:1`: no locale tooling in the repository.
+- `CLAUDE.md:1`: no locale tooling in the repository.
 
 ## Assumptions
 

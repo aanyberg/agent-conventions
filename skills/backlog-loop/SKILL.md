@@ -81,6 +81,8 @@ Arguments of this invocation: `$ARGUMENTS`
   they run in parallel. Never more than the action lists.
 - If workers run in the background, end your turn after starting them. Their
   completion notification brings you back; then run `next.sh`.
+- Nothing is tested locally, by you or by workers. CI on the pull request is
+  the only test gate.
 - A worker's report is a claim. `state.sh record worker-done <batch>` checks
   the pushed branch for one commit per item.
 
@@ -100,7 +102,7 @@ Arguments of this invocation: `$ARGUMENTS`
 | `rebase_batch` | One command; the PR branch is updated from the base branch. |
 | `resolve_conflict` | One worker attempt, otherwise the batch is re-queued last. |
 | `merge` | Verify, run the printed merge command, confirm. |
-| `verify` | The script confirms the merge and re-checks the base branch. |
+| `verify` | The script confirms the merge and reads CI on the base branch; repeat while it prints `PENDING`. |
 | `revert_batch` | The base branch is red: revert the PR, then the loop halts. |
 | `mark_blocked` | Run `mark-blocked.sh` with what was tried, why it failed, what is needed. |
 | `sync_backlog` | File source only: the status update for `BACKLOG.md` goes out as a last PR. |

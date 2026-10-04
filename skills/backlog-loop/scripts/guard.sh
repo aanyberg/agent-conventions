@@ -118,7 +118,7 @@ check_merge() {
     fi
   fi
   checks="$(bl_pr_checks "$pr")"
-  if [ "$checks" != "green" ] && ! { [ "$checks" = "none" ] && [ "$(bl_cfg ci)" = "none" ]; }; then
+  if [ "$checks" != "green" ]; then
     deny "checks on PR #$pr are $checks, not green. Wait with: $BL_SCRIPT_DIR/ci-wait.sh"
   fi
 }

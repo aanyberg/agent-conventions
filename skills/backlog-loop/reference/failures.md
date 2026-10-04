@@ -14,7 +14,7 @@ and transitions are never yours to decide.
 | Hard blocker | worker report | `mark_blocked` | Blocked immediately. |
 | Merge conflict | `verify-batch.sh` | `resolve_conflict` | One fix attempt, otherwise the batch is re-queued last. |
 | Base branch behind | `verify-batch.sh pre-merge` | `rebase_batch` | The PR branch is updated and CI runs again. |
-| Base red after merge | `verify-batch.sh post-merge` | `revert_batch` | The PR is reverted, the batch is blocked, the loop halts. |
+| Base red after merge | `verify-batch.sh post-merge`, from CI on the merge commit | `revert_batch` | The PR is reverted, the batch is blocked, the loop halts. |
 | Worker lost or silent | `next.sh` deadline | `implement_batch` again | One attempt is counted for the items without a commit. |
 | Crash, usage limit, closed terminal | next `/backlog-loop` | resume | State is reconciled with GitHub; merged batches are never redone. |
 | Stall | `stop-gate.sh` | none | State unchanged across 2 gate checks: status `stalled`, report. |
@@ -27,7 +27,7 @@ and transitions are never yours to decide.
    `gh pr checks <pr>`, `gh run list --branch <branch> --limit 5`,
    `gh run view <run id> --log-failed`.
 2. Decide which of these it is:
-   - **The change is wrong.** A test, lint or build failure caused by the diff.
+   - **The change is wrong.** A failing check caused by the diff.
      Delegate a fix: `state.sh worker-prompt <batch> --mode fix`, then append
      your diagnosis and the failing log lines to the prompt.
    - **One item is the cause and the rest is sound.** Name it:
@@ -65,7 +65,7 @@ batch also wait for the retry.
 
 One attempt. The worker merges the base branch into the batch branch (never a
 rebase, which would need a force-push), resolves the conflicts keeping the
-intent of both sides, runs the checks and pushes. Then
+intent of both sides, and pushes. Then
 `state.sh record conflict-resolved <batch>`. If the worker cannot resolve it
 cleanly: `state.sh record conflict-failed <batch>`. The PR is closed and the
 batch is implemented again, last, from the new base. A second re-queue blocks

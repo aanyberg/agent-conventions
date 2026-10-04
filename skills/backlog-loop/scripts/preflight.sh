@@ -84,9 +84,6 @@ CONFIG_SECTION='## Backlog loop
 - label: backlog          (github only)
 - path: BACKLOG.md        (file only)
 - base-branch: main
-- test: <command>
-- lint: <command, or none>
-- build: <command, or none>
 - merge-method: squash    (or: merge, rebase)'
 
 section_text=""
@@ -106,52 +103,6 @@ cfg_raw() {
     head -n 1 | sed -e 's/[[:space:]]*$//' -e 's/^`\(.*\)`$/\1/'
 }
 
-detect_cmd() {
-  # detect_cmd <test|lint|build>
-  local class="$1" pm script
-  if [ -f package.json ]; then
-    script="$(jq -r --arg c "$class" '.scripts[$c] // empty' package.json 2>/dev/null)"
-    case "$script" in
-      "" | *"no test specified"*) ;;
-      *)
-        pm=npm
-        [ -f pnpm-lock.yaml ] && pm=pnpm
-        [ -f yarn.lock ] && pm=yarn
-        if [ -f bun.lockb ] || [ -f bun.lock ]; then pm=bun; fi
-        if [ "$class" = "test" ]; then echo "$pm test"; else echo "$pm run $class"; fi
-        return 0
-        ;;
-    esac
-  fi
-  if [ -f Makefile ] && grep -qE "^$class:" Makefile; then
-    echo "make $class"
-    return 0
-  fi
-  if [ -f Cargo.toml ]; then
-    case "$class" in
-      test) echo "cargo test" ;;
-      lint) echo "cargo clippy -- -D warnings" ;;
-      build) echo "cargo build" ;;
-    esac
-    return 0
-  fi
-  if [ -f go.mod ]; then
-    case "$class" in
-      test) echo "go test ./..." ;;
-      lint) echo "go vet ./..." ;;
-      build) echo "go build ./..." ;;
-    esac
-    return 0
-  fi
-  if [ -f pyproject.toml ]; then
-    case "$class" in
-      test) if grep -q pytest pyproject.toml; then echo "pytest"; return 0; fi ;;
-      lint) if grep -q ruff pyproject.toml; then echo "ruff check ."; return 0; fi ;;
-    esac
-  fi
-  return 1
-}
-
 limit() {
   # limit <config key> <default>
   local v
@@ -166,20 +117,12 @@ C_SOURCE="$(cfg_raw source)"
 C_LABEL="$(cfg_raw label)"
 C_PATH="$(cfg_raw path)"
 C_BASE="$(cfg_raw base-branch)"
-C_TEST="$(cfg_raw test)"
-C_LINT="$(cfg_raw lint)"
-C_BUILD="$(cfg_raw build)"
 C_METHOD="$(cfg_raw merge-method)"
-C_CI="$(cfg_raw ci)"
 [ -n "$C_LABEL" ] || C_LABEL="backlog"
 [ -n "$C_PATH" ] || C_PATH="BACKLOG.md"
 [ -n "$C_METHOD" ] || C_METHOD="squash"
-[ -n "$C_CI" ] || C_CI="required"
 [ -n "$C_BASE" ] || C_BASE="$(printf '%s' "$REPO_JSON" | jq -r '.defaultBranchRef.name // empty' 2>/dev/null)"
 [ -n "$C_BASE" ] || C_BASE="$(git symbolic-ref -q --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')"
-[ -n "$C_TEST" ] || C_TEST="$(detect_cmd test)"
-[ -n "$C_LINT" ] || C_LINT="$(detect_cmd lint)"
-[ -n "$C_BUILD" ] || C_BUILD="$(detect_cmd build)"
 
 config_errors=""
 if [ -z "$C_SOURCE" ]; then
@@ -201,12 +144,7 @@ if [ -z "$C_SOURCE" ]; then
 fi
 case "$C_SOURCE" in github | file | "") ;; *) config_errors="$config_errors source must be github or file, not '$C_SOURCE';" ;; esac
 case "$C_METHOD" in squash | merge | rebase) ;; *) config_errors="$config_errors merge-method must be squash, merge or rebase;" ;; esac
-case "$C_CI" in required | none) ;; *) config_errors="$config_errors ci must be required or none;" ;; esac
 [ -n "$C_BASE" ] || config_errors="$config_errors base-branch could not be detected;"
-[ -n "$C_TEST" ] || config_errors="$config_errors test command could not be detected;"
-[ -n "$C_LINT" ] || config_errors="$config_errors lint command could not be detected (set it, or 'none');"
-[ -n "$C_BUILD" ] || config_errors="$config_errors build command could not be detected (set it, or 'none');"
-[ "$C_TEST" != "none" ] || config_errors="$config_errors test must be a real command;"
 
 config_errors="${config_errors# }"
 
@@ -374,7 +312,7 @@ if [ -n "$REPO" ] && [ -n "$C_BASE" ]; then
       "allow bypass for your account, or run with --no-merge"
     rules_ok=0
   fi
-  if [ -n "$required" ] && [ "$C_CI" != "none" ]; then
+  if [ -n "$required" ]; then
     sha="$(git rev-parse "refs/remotes/origin/$C_BASE" 2>/dev/null)"
     reported="$(
       gh api "repos/$REPO/commits/$sha/check-runs" --jq '.check_runs[].name' 2>/dev/null
@@ -392,7 +330,7 @@ EOT
         "make the workflows that produce these checks run on pull requests and on $C_BASE, or remove them from the rules"
       rules_ok=0
     fi
-  elif [ -z "$required" ] && [ "$C_CI" != "none" ]; then
+  else
     warn "Branch rules" "$C_BASE has no required status checks; the loop still waits for every check on each PR"
   fi
   if [ "$NO_MERGE" -eq 0 ] && [ "$(jq -n --argjson r "$rules" '[$r[] | select(.type == "merge_queue")] | length')" -gt 0 ]; then
@@ -428,9 +366,7 @@ fi
 
 # --- CI ---------------------------------------------------------------------------------
 
-if [ "$C_CI" = "none" ]; then
-  pass
-elif [ -n "$REPO" ]; then
+if [ -n "$REPO" ]; then
   workflows=0
   for wf in .github/workflows/*.yml .github/workflows/*.yaml; do
     [ -f "$wf" ] && grep -q "pull_request" "$wf" && workflows=$((workflows + 1))
@@ -439,7 +375,7 @@ elif [ -n "$REPO" ]; then
   runs="$(gh api "repos/$REPO/commits/$sha/check-runs" --jq '.total_count' 2>/dev/null)"
   if [ "$workflows" -eq 0 ] && [ "${runs:-0}" = "0" ]; then
     fail "CI" "no workflow runs on pull requests and no checks are reported on $C_BASE" \
-      "add a workflow triggered by pull_request, or set 'ci: none' in the Backlog loop section to rely on local test, lint and build"
+      "add a workflow triggered by pull_request. CI is the only test gate of the loop; nothing is tested locally"
   else
     pass
     [ "$workflows" -gt 0 ] || warn "CI" "no local workflow has a pull_request trigger; checks seem to come from an external service"
@@ -460,27 +396,19 @@ fi
 # --- Baseline: the CI result of the base branch, never a local test run -----------------------
 
 if [ -n "$REPO" ] && [ -n "$C_BASE" ]; then
-  sha="$(git rev-parse "refs/remotes/origin/$C_BASE" 2>/dev/null)"
-  base_checks="$(
-    gh api "repos/$REPO/commits/$sha/check-runs" \
-      --jq '.check_runs[] | "\(.name)\t\(.status // "completed")\t\(.conclusion // "")"' 2>/dev/null
-    gh api "repos/$REPO/commits/$sha/status" \
-      --jq '.statuses[] | "\(.context)\t\(if .state == "pending" then "in_progress" else "completed" end)\t\(.state)"' 2>/dev/null
-  )"
-  TAB="$(printf '\t')"
-  red="$(printf '%s\n' "$base_checks" | awk -F "$TAB" '$3 ~ /^(failure|timed_out|cancelled|action_required|startup_failure|error)$/ { print $1 }' | sort -u | tr '\n' ' ')"
-  running="$(printf '%s\n' "$base_checks" | awk -F "$TAB" '$1 != "" && $2 != "completed" { print $1 }' | sort -u | tr '\n' ' ')"
-  if [ -n "$red" ]; then
-    fail "Baseline" "CI is red on $C_BASE: ${red% }" "$C_BASE must be green before starting"
-  elif [ -n "$running" ]; then
-    pass
-    warn "Baseline" "CI is still running on $C_BASE (${running% }); the loop starts without a confirmed green base"
-  elif [ -z "$base_checks" ]; then
-    pass
-    warn "Baseline" "no CI result for the head of $C_BASE; the loop starts without a confirmed green base"
-  else
-    pass
-  fi
+  base_ci="$(bl_commit_checks "$REPO" "$(git rev-parse "refs/remotes/origin/$C_BASE" 2>/dev/null)")"
+  case "$base_ci" in
+    red*) fail "Baseline" "CI is red on $C_BASE: ${base_ci#red }" "$C_BASE must be green before starting" ;;
+    pending)
+      pass
+      warn "Baseline" "CI is still running on $C_BASE; the loop starts without a confirmed green base"
+      ;;
+    none)
+      pass
+      warn "Baseline" "no CI result for the head of $C_BASE; the loop starts without a confirmed green base"
+      ;;
+    *) pass ;;
+  esac
 fi
 
 # --- Claude tools: deny and ask rules in settings ------------------------------------------------
@@ -526,9 +454,7 @@ for settings in "$HOME/.claude/settings.json" "$BL_ROOT/.claude/settings.json" "
           pattern="${rule#Bash(}"
           pattern="${pattern%)}"
           for needed in "git push origin backlog-loop/x" "git commit -m x" "git fetch origin" "git worktree add x" \
-            "gh pr create --base x" "gh pr merge 1 --squash" "gh pr checks 1" "gh issue comment 1" \
-            "$C_TEST" "$C_LINT" "$C_BUILD"; do
-            case "$needed" in "" | none) continue ;; esac
+            "gh pr create --base x" "gh pr merge 1 --squash" "gh pr checks 1" "gh issue comment 1"; do
             if [ "$NO_MERGE" -eq 1 ] && [ "$needed" = "gh pr merge 1 --squash" ]; then continue; fi
             if rule_matches "$pattern" "$needed"; then
               fail "Claude tools" "$kind rule '$rule' in $settings matches a command the loop needs ($needed)" \
@@ -558,20 +484,19 @@ if [ "$C_SOURCE" = "github" ]; then
   gh label create needs-review --description "Decided with low confidence (backlog-loop)" --color FBCA04 >/dev/null 2>&1 || true
 fi
 jq -n --arg source "$C_SOURCE" --arg lbl "$C_LABEL" --arg path "$C_PATH" --arg base "$C_BASE" \
-  --arg repo "$REPO" --arg test "$C_TEST" --arg lint "$C_LINT" --arg build "$C_BUILD" \
-  --arg method "$C_METHOD" --arg ci "$C_CI" --argjson web "$RESEARCH_WEB" \
+  --arg repo "$REPO" --arg method "$C_METHOD" --argjson web "$RESEARCH_WEB" \
   --argjson max_attempts "$(limit max-attempts 3)" --argjson ci_reruns "$(limit ci-reruns 1)" \
   --argjson ci_wait "$(limit ci-wait-minutes 45)" --argjson research "$(limit research-passes 1)" \
   --argjson parallel "$(limit parallel-batches 2)" --argjson stall "$(limit stall-threshold 2)" \
   --argjson iterations "$(limit max-iterations 100)" --argjson hours "$(limit max-hours 12)" \
-  --argjson worker "$(limit worker-wait-minutes 120)" --argjson baseline "$(limit baseline-minutes 30)" \
+  --argjson worker "$(limit worker-wait-minutes 120)" \
   --argjson batch_items "$(limit max-batch-items 15)" '
   { source: $source, "label": $lbl, path: $path, base_branch: $base, repo: $repo,
-    test: $test, lint: $lint, build: $build, merge_method: $method, ci: $ci, research_web: $web,
+    merge_method: $method, research_web: $web,
     limits: { max_attempts: $max_attempts, ci_reruns: $ci_reruns, ci_wait_minutes: $ci_wait,
               research_passes: $research, parallel_batches: $parallel, stall_threshold: $stall,
               max_iterations: $iterations, max_hours: $hours, worker_wait_minutes: $worker,
-              baseline_minutes: $baseline, max_batch_items: $batch_items } }' >"$BL_CONFIG.tmp" &&
+              max_batch_items: $batch_items } }' >"$BL_CONFIG.tmp" &&
   mv -f "$BL_CONFIG.tmp" "$BL_CONFIG"
 
 init_args="--session $SESSION"

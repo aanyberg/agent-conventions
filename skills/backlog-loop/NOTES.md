@@ -159,8 +159,9 @@ guarded, because jq 1.6 exits 0 there.
 
 ## 6. Parallel items per batch
 
-**Status:** accepted, 2026-10-04. Replaces parts of sections 3 and
-5 once accepted.
+**Status:** accepted and built, 2026-10-04. Where sections 3 and 5 describe
+batch workers, `depends_on`, `parallel-batches` or `version: 1`, this section
+replaces them.
 
 ### Context
 
@@ -199,14 +200,16 @@ flowchart LR
    commit ahead of `origin/<base>`, with the right trailer.
 2. **Integrate.** When every item of the batch has finished or failed,
    `state.sh integrate <batch>` builds the batch branch from `origin/<base>`
-   in a scratch worktree, cherry-picks the finished items in plan order, and
-   pushes once. A cherry-pick that conflicts is aborted and the item is marked
-   for the next step; the others continue.
+   in a scratch worktree and cherry-picks the finished items in plan order.
+   The branch stays local. A cherry-pick that conflicts is aborted and the
+   item is marked for the next step; the others continue.
 3. **Apply a conflicting item.** One worker per conflicting item, one at a
-   time, on the batch branch: it applies the item's change by hand, commits
-   with the trailer, and pushes. If it fails, the item is deferred.
-4. **Open the PR** once no item is waiting. From here the batch follows the
-   existing path: CI wait, rerun, fix, drop, update from base, merge, verify.
+   time, on the local batch branch: it applies the item's change by hand and
+   commits with the trailer. If it fails, the item is deferred.
+4. **Open the PR** once no item is waiting: `state.sh open-pr` pushes the
+   batch branch, the only push of the batch, and creates the PR. From here the
+   batch follows the existing path: CI wait, rerun, fix, drop, update from
+   base, merge, verify.
 5. **Next batch** starts after the merge is verified. Research for the next
    batch's unclear items may run while the current batch waits for CI.
 
@@ -235,7 +238,8 @@ Preflight warns when a named agent file is not found in the project or user
 agent directory. The skill ships no agent files.
 
 **Commit shape.** `batch-commits: per-item` (default) or `squashed`. With
-`squashed`, `integrate` folds the applied items into one commit carrying every
+`squashed`, `integrate` (and `open-pr`, after apply workers) folds the applied
+items into one commit carrying every
 `Backlog-Item` trailer. Dropping a single item is then impossible: a red CI is
 fixed by a worker or, after the attempts run out, blocks the batch's items.
 With the default squash merge both shapes land on the base branch as one

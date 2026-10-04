@@ -1,6 +1,6 @@
 ---
 name: backlog-loop
-description: Implement every item in the project backlog in themed, CI-gated pull request batches until all are merged or blocked.
+description: Implement every item in the project backlog in CI-gated pull request batches, the items of each batch in parallel, until all are merged or blocked.
 argument-hint: "[--plan-only] [--resume] [--no-merge] [--gitignore]"
 disable-model-invocation: true
 disallowed-tools: AskUserQuestion
@@ -74,31 +74,34 @@ Arguments of this invocation: `$ARGUMENTS`
 
 ## Workers
 
-- Implementation, fixes, conflict resolution and drops: Agent tool,
-  `subagent_type: "general-purpose"`, `isolation: "worktree"`, and the `model`
-  the action names for the batch's tier (none when it names none). The prompt is
-  the verbatim output of `state.sh worker-prompt`, plus your diagnosis when the
-  action asks for it.
+- Items, applies, fixes, conflict resolution and drops: the Agent tool call the
+  action spells out: `isolation: "worktree"`, its `subagent_type`
+  (`general-purpose` or the project's agent) and its `model`, if it names one.
+  The prompt is the verbatim output of `state.sh worker-prompt`, plus your
+  diagnosis when the action asks for it.
 - Research: Agent tool, `subagent_type: "Explore"`, the `model` the action
-  names, prompt from
-  `state.sh research-prompt`. One pass per question.
-- When an action lists several batches, start their workers in one message so
+  names, prompt from `state.sh research-prompt`. One pass per question.
+- When an action lists several items, start their workers in one message so
   they run in parallel. Never more than the action lists.
-- Tell the user which model each worker runs on, as the action summary states.
+- Tell the user which model or agent each worker runs on, as the action
+  summary states.
 - If workers run in the background, end your turn after starting them. Their
   completion notification brings you back; then run `next.sh`.
 - Nothing is tested locally, by you or by workers. CI on the pull request is
   the only test gate.
-- A worker's report is a claim. `state.sh record worker-done <batch>` checks
-  the pushed branch for one commit per item.
+- Item workers commit locally and do not push. A worker's report is a claim:
+  `state.sh record item-done <item>` checks the item branch for its one
+  commit. The batch branch is pushed once, when its PR opens.
 
 ## Actions
 
 | Action | What you do |
 |---|---|
 | `preflight` | Run the Start steps above. |
-| `plan` | Read all items, cluster them, write `plan.json`. Read `reference/batching.md` first. |
-| `implement_batch` | Start one worker per listed batch, then record what each pushed. |
+| `plan` | Read all items, split them into batches, write `plan.json`. Read `reference/batching.md` first. |
+| `implement_items` | Start one worker per listed item, then record what each committed. |
+| `integrate` | One command; the item commits are combined onto the batch branch. |
+| `apply_item` | One worker applies a conflicting item by hand; otherwise it moves to the next batch. |
 | `research` | One `Explore` pass, then write the decision record. Read `reference/research.md`. |
 | `open_pr` | One command; the script writes the PR body with `Closes #<id>` lines and decisions. |
 | `wait_ci` | Run `ci-wait.sh`; repeat while it prints `PENDING`. |

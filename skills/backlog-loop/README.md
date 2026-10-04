@@ -1,12 +1,13 @@
 # backlog-loop
 
-A Claude Code skill that works through a project backlog on its own. It groups
-related items, implements each group as one pull request, waits for CI, merges,
-and moves on. Items it cannot finish are marked blocked with a reason. You come
-back to merged work and a short report.
+A Claude Code skill that works through a project backlog on its own. It splits
+the items into batches and implements the items of each batch in parallel, one
+worker each. Each batch becomes one pull request: it waits for CI, merges, and
+the next batch starts. Items it cannot finish are marked blocked with a reason.
+You come back to merged work and a short report.
 
-- **Few, themed PRs.** Around ten pull requests for a hundred items, each
-  reviewable on its own.
+- **Parallel work, few PRs.** Up to five workers at once by default, one CI
+  run per batch, each PR reviewable on its own.
 - **CI is the only judge.** The loop runs no tests locally. A PR merges only
   when every check is green, and the base branch is checked again afterwards.
 - **No questions.** An unclear item is researched and decided, and the decision
@@ -95,10 +96,11 @@ flowchart TD
     Skill -->|"1. ask"| Next["next.sh<br/>decides the next action"]
     Next -->|"reads / writes"| State[("state.json<br/>.planning/backlog-loop/")]
     Next -->|"2. returns one action as JSON"| Skill
-    Skill -->|"3a. implement, fix, resolve"| Worker["Worker agent<br/>own git worktree"]
+    Skill -->|"3a. implement items in parallel,<br/>apply, fix, resolve"| Worker["Worker agents<br/>one worktree each"]
     Skill -->|"3b. research"| Research["Explore agent<br/>read-only"]
     Skill -->|"3c. PR, CI, merge, verify"| Scripts["scripts/*.sh"]
-    Worker -->|"push branch"| GH["GitHub<br/>PRs, CI, issues"]
+    Worker -->|"local item commits"| Scripts
+    Scripts -->|"push batch branch once"| GH["GitHub<br/>PRs, CI, issues"]
     Scripts <-->|"gh / git"| GH
     Worker -.->|"result recorded via"| Scripts
     Scripts -->|"state.sh record"| State
@@ -115,7 +117,10 @@ the outcome against git and GitHub rather than trusting the agent's report.
 
 ```mermaid
 flowchart LR
-    A[implement] --> B[open PR]
+    P["implement items<br/>in parallel"] --> Q["integrate<br/>cherry-pick onto batch branch"]
+    Q -->|conflict| R[apply item by hand]
+    R --> Q
+    Q --> B[open PR]
     B --> C[wait for CI]
     C -->|green| D[update from base]
     C -->|red| E[rerun once, then fix or drop item]
@@ -126,9 +131,11 @@ flowchart LR
     G -->|red| I[revert and halt]
 ```
 
+Batches run one at a time; the next starts after the merge is verified. An
+item whose worker fails, or that cannot be applied, moves to the next batch.
 Items that fail three attempts, or hit a hard blocker (missing credentials,
-destructive change), are marked blocked and leave the batch. Unclear items get
-one research pass and a decision record before their batch starts.
+destructive change), are marked blocked. Unclear items get one research pass
+and a decision record before they start.
 
 ### Components
 

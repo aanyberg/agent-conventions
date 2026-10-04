@@ -9,13 +9,16 @@ and transitions are never yours to decide.
 | CI red | `ci-wait.sh` | `rerun_ci`, then `fix_ci` | First red: failed jobs are rerun once. Red again: one attempt is counted for every item in the batch. |
 | Flaky CI | `ci-wait.sh` | `rerun_ci` | Green after the rerun: nothing is counted. |
 | CI never finishes | `ci-wait.sh` deadline | `fix_ci` (timeout form) | Counts as a failed attempt. |
-| One item poisons a batch | you, in `fix_ci` | `drop_item` | Its commit is reverted on the branch; it is retried in a batch of its own. |
+| One item poisons a batch | you, in `fix_ci` | `drop_item` | Its commit is reverted on the branch; it is retried in a batch of its own. Not available with `batch-commits: squashed`. |
+| Item worker fails | `record item-done` / `item-failed` | none | One attempt counted; the item moves to the next batch. |
+| Items of a batch conflict | `state.sh integrate` | `apply_item` | One worker applies the item by hand, otherwise it moves to the next batch with one attempt counted. |
+| Needed item not merged | `next.sh` | none | The item moves to the next batch, no attempt counted. A blocked needed item blocks it. |
 | Item fails 3 attempts | `state.sh` | `mark_blocked` | The item is blocked and leaves its batch. |
 | Hard blocker | worker report | `mark_blocked` | Blocked immediately. |
 | Merge conflict | `verify-batch.sh` | `resolve_conflict` | One fix attempt, otherwise the batch is re-queued last. |
 | Base branch behind | `verify-batch.sh pre-merge` | `rebase_batch` | The PR branch is updated and CI runs again. |
 | Base red after merge | `verify-batch.sh post-merge`, from CI on the merge commit | `revert_batch` | The PR is reverted, the batch is blocked, the loop halts. |
-| Worker lost or silent | `next.sh` deadline | `implement_batch` again | One attempt is counted for the items without a commit. |
+| Worker lost or silent | `next.sh` deadline | none | One attempt is counted and the item moves to the next batch. |
 | Crash, usage limit, closed terminal | next `/backlog-loop` | resume | State is reconciled with GitHub; merged batches are never redone. |
 | Stall | `stop-gate.sh` | none | State unchanged across 2 gate checks: status `stalled`, report. |
 | Concurrent run | `preflight.sh` | none | The second run refuses to start. |
@@ -98,14 +101,17 @@ PR at the end of the run. The item leaves its batch and the loop continues.
 
 ## Worker problems
 
-- **No report, or a crash:** `state.sh record worker-failed <batch> --reason "..."`.
-- **Report says done, branch says otherwise:** `record worker-done` trusts the
-  branch. Items without a commit carrying `Backlog-Item: <id>` count as failed.
+- **No report, or a crash:** `state.sh record item-failed <item> --reason "..."`
+  (apply workers: `record apply-failed`).
+- **Report says done, branch says otherwise:** `record item-done` trusts the
+  branch. An item branch without exactly one commit carrying
+  `Backlog-Item: <id>` counts as a failed attempt.
 - **Worker says an item is unclear:** `state.sh record unclear <item>
-  --question "..."`, then `record worker-done`. The item is researched and the
-  batch continues with it.
+  --question "..."`, then `record item-done`. No attempt is counted; the item
+  is researched and starts again in the same batch.
 - **Worker past its deadline** (default 120 minutes): `next.sh` counts a failed
-  attempt. Stop the hung worker if it is still listed as running.
+  attempt and moves the item on. Stop the hung worker if it is still listed as
+  running.
 
 ## Stall, limits, and resuming
 

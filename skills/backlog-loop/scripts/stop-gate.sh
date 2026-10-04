@@ -109,6 +109,7 @@ while kill -0 "$pid" 2>/dev/null; do
   if [ $(($(date +%s) - start)) -ge "$deadline" ]; then
     pkill -TERM -P "$pid" 2>/dev/null || true
     kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null
     bl_log "gate deadline of ${deadline}s hit, allowing stop"
     rm -f "$OUT"
     exit 0

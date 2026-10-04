@@ -70,7 +70,7 @@ bl_log() {
 }
 
 bl_state_ok() {
-  [ -s "${BL_STATE:-}" ] && jq -e '.run and (.items | type == "array") and (.batches | type == "array")' "$BL_STATE" >/dev/null 2>&1
+  [ -s "${BL_STATE:-}" ] && jq -e -s 'length == 1 and (.[0] | .run and (.items | type == "array") and (.batches | type == "array"))' "$BL_STATE" >/dev/null 2>&1
 }
 
 bl_run_active() {

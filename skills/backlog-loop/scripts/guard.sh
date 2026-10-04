@@ -92,7 +92,7 @@ check_push() {
 
 check_merge() {
   # $@: words after "gh pr merge".
-  local w sel="" pr checks b
+  local w sel="" pr checks b verified
   for w in "$@"; do
     w="$(strip "$w")"
     case "$w" in
@@ -112,7 +112,8 @@ check_merge() {
   [ -n "$pr" ] || deny "could not identify the pull request to merge, so its checks cannot be verified"
   b="$(jq -r --argjson pr "$pr" '.batches[] | select(.pr == $pr) | .id' "$BL_STATE" | head -n 1)"
   if [ -n "$b" ]; then
-    if [ "$(jq -r --argjson b "$b" '.batches[] | select(.id == $b) | .premerge_sha // empty' "$BL_STATE")" != "$(bl_pr_field "$pr" headRefOid)" ]; then
+    verified="$(jq -r --argjson b "$b" '.batches[] | select(.id == $b) | .premerge_sha // empty' "$BL_STATE")"
+    if [ -z "$verified" ] || [ "$verified" != "$(bl_pr_field "$pr" headRefOid)" ]; then
       deny "PR #$pr (batch $b) is not verified for merge. Run: $BL_SCRIPT_DIR/verify-batch.sh $b pre-merge"
     fi
   fi

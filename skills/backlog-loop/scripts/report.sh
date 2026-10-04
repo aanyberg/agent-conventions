@@ -43,7 +43,8 @@ text="$(jq -r --arg dir ".planning/backlog-loop" '
   printf 'Run %s, started %s, %s iterations. Written %s.\n\n' "$(bl_get '.run.id')" \
     "$(bl_get '.run.started_iso')" "$(bl_get '.run.total_iterations')" "$(bl_iso)"
   printf '```text\n%s\n```\n\n## Batches\n\n' "$text"
-  jq -r '.batches | sort_by(.id)[] | "- Batch \(.id) \"\(.theme)\": \(.status)"
+  jq -r "$BL_JQ_MODEL"'.config as $cfg | .batches | sort_by(.id)[]
+    | "- Batch \(.id) \"\(.theme)\" (\(tier_model($cfg; batch_tier))): \(.status)"
     + (if .pr then ", PR #\(.pr)" else "" end)
     + (if .revert_pr then ", reverted in PR #\(.revert_pr)" else "" end)
     + (if .last_error and .status != "merged" then ". Last error: \(.last_error)" else "" end)' "$BL_STATE"

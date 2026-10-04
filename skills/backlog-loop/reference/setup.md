@@ -65,6 +65,14 @@ repository without CI fails preflight.
 | `path` | `BACKLOG.md` | File: the backlog file. |
 | `base-branch` | repository default | Branch the PRs target. |
 | `merge-method` | `squash` | `squash`, `merge` or `rebase`. |
+| `model-light` | `haiku` | Model for `light` batches and for research. |
+| `model-standard` | `sonnet` | Model for `standard` batches. |
+| `model-complex` | `opus` | Model for `complex` batches. |
+
+A model is `haiku`, `sonnet`, `opus`, `fable`, or `inherit` (the
+orchestrator's model). The tier of each batch is chosen at planning time; see
+[batching.md](batching.md#model-tier). Reasoning effort cannot be set per
+worker: workers use the effort of the session that runs the loop.
 
 Limits, all optional:
 
@@ -74,7 +82,7 @@ Limits, all optional:
 | `ci-reruns` (per batch) | 1 |
 | `ci-wait-minutes` (per attempt) | 45 |
 | `research-passes` (per question) | 1 |
-| `parallel-batches` | 2 |
+| `parallel-batches` | 4 |
 | `stall-threshold` (unchanged gate checks) | 2 |
 | `max-iterations` | 100 |
 | `max-hours` | 12 |

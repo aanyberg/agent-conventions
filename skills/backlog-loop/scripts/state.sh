@@ -25,7 +25,7 @@ def set_batch($b; f): .batches |= map(if .id == $b then f else . end);
 def set_items($b; f): .items |= map(if .batch == $b and live then f else . end);
 def set_item($i; f): .items |= map(if .id == $i then f else . end);
 def new_batch($id; $theme; $items; $deps; $order): {
-  id: $id, kind: "items", theme: $theme, title: null, rationale: null,
+  id: $id, kind: "items", theme: $theme, title: null, rationale: null, tier: "standard",
   items: $items, order: $order, depends_on: $deps,
   status: "todo", phase: null, tries: 1, branch: null, old_branches: [], pushed: false,
   pr: null, revert_pr: null, head_sha: null, premerge_sha: null, merge_commit: null,
@@ -224,6 +224,8 @@ cmd_plan_apply() {
           | (if ((.items // []) | length) == 0 then "batch \($n) has no items" else empty end),
             (if (.theme // "") == "" then "batch \($n) has no theme" else empty end),
             (if ((.items // []) | length) > $max then "batch \($n) has more than \($max) items" else empty end),
+            ((.tier // "standard") | select(IN("light", "standard", "complex") | not)
+              | "batch \($n) has tier '\''\(.)'\''; use light, standard or complex"),
             ((.depends_on // [])[] | select(. >= $n or . < 1) | "batch \($n) may only depend on earlier batches, not \(.)")),
         ($todo[] | . as $i | ($all | map(select(. == $i)) | length) as $c
           | select($c != 1) | "item \($i) is in \($c) batches, expected exactly 1"),
@@ -238,7 +240,7 @@ cmd_plan_apply() {
     $plan[0] as $p
     | .batches = [ $p.batches | to_entries[] | (.key + 1) as $n | .value as $v
         | new_batch($n; $v.theme; [$v.items[] | tostring]; ($v.depends_on // []); $n)
-        | .title = ($v.title // null) | .rationale = ($v.rationale // null) ]
+        | .title = ($v.title // null) | .rationale = ($v.rationale // null) | .tier = ($v.tier // "standard") ]
     | reduce .batches[] as $b (.;
         .items |= map(. as $it | if has_id($b.items; $it.id) then .batch = $b.id else . end))
     | reduce ($p.unclear // [])[] as $u (.;
@@ -250,7 +252,7 @@ cmd_plan_apply() {
 }
 
 write_plan_md() {
-  jq -r --arg src "$(bl_cfg source)" '
+  jq -r --arg src "$(bl_cfg source)" "$BL_JQ_MODEL"'
     def ref($i): (if $src == "github" then "#" else "" end) + $i;
     . as $s
     | "# Backlog loop plan",
@@ -261,6 +263,7 @@ write_plan_md() {
         | "## Batch \($b.id): \($b.theme)",
           "",
           (if ($b.depends_on | length) > 0 then "Depends on: " + ($b.depends_on | map("batch \(.)") | join(", ")) else "Depends on: nothing" end),
+          ($b | batch_tier as $t | "Model: \(tier_model($s.config; $t)) (\($t) tier)"),
           (if $b.rationale then "", $b.rationale else empty end),
           "",
           ($b.items[] as $i | ($s.items[] | select(.id == $i)) as $it
@@ -780,13 +783,14 @@ record_item_dropped() {
     ([.batches[].id] | max + 1) as $nid
     | ([.batches[].order] | max + 1) as $last
     | (.items[] | select(.id == $i)) as $it
+    | (.batches[] | select(.id == $b) | .tier // "standard") as $tier
     | set_batch($b; .items -= [$i] | .removed += [$i] | .head_sha = $sha
         | if .pr != null then .phase = "ci" | .ci_started_at = $now | .ci_polls = 0 else . end)
     | if $it.attempts >= $max then
         set_item($i; .batch = null | .pending = "block")
       else
         set_item($i; .batch = $nid | .pending = null | .status = "todo")
-        | .batches += [new_batch($nid; "Retry of \($i): \($it.title)"; [$i]; []; $last) | .retry_of = $b]
+        | .batches += [new_batch($nid; "Retry of \($i): \($it.title)"; [$i]; []; $last) | .retry_of = $b | .tier = $tier]
         | .batches |= map(if (.depends_on | index($b)) != null and .id != $nid then .depends_on += [$nid] else . end)
       end'
   settle_batch "$b"

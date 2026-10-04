@@ -33,6 +33,8 @@ but never at the price of a PR nobody can review.
   with the question. It is researched before its batch starts.
 - Prefer two medium batches over one that only just fits the limit. Independent
   batches are implemented in parallel, so splitting costs little.
+- Aim for at least as many independent batches as `parallel-batches` (default
+  4). A plan whose batches form one chain runs one worker at a time.
 - Do not create a batch per item unless the items really are unrelated. Every
   batch costs a full CI cycle, plus one more when the base branch has moved.
 
@@ -41,9 +43,24 @@ but never at the price of a PR nobody can review.
 - `depends_on` lists earlier batch numbers. A batch starts only after those are
   merged.
 - Add a dependency only for a real one: shared code that must exist first, or
-  an item that says "after #n". An unnecessary dependency removes parallelism,
+  an item that says "after #n". Same theme or same area is not a dependency.
+  An unnecessary dependency removes parallelism,
   and with `--no-merge` it stalls the dependent batch until you merge.
 - If a batch ends up blocked, the batches that depend on it are blocked too.
+
+## Model tier
+
+Each batch gets a `tier`, which picks the model its workers run on:
+
+| Tier | Default model | Use for |
+|---|---|---|
+| `light` | Haiku | Mechanical changes: typos, copy, renames, config values, docs, dependency bumps with no code changes. |
+| `standard` | Sonnet | Ordinary feature work and bug fixes in code you can read locally. The default. |
+| `complex` | Opus | Cross-cutting changes, concurrency, security, data migrations, or logic where a wrong guess is costly. |
+
+Pick the tier for the hardest item in the batch. When in doubt, choose
+`standard`. Fix, conflict and drop workers use the batch's tier. The project
+can map tiers to other models (`reference/setup.md`).
 
 ## Plan format
 
@@ -56,6 +73,7 @@ Write `.planning/backlog-loop/plan.json`:
       "theme": "Address form validation",
       "title": "feat(forms): validate address fields",
       "rationale": "Three items change the same validator and its tests.",
+      "tier": "standard",
       "items": ["12", "15", "21"],
       "depends_on": []
     },
@@ -76,9 +94,11 @@ Write `.planning/backlog-loop/plan.json`:
 - `title`: the PR title. Follow the repository's commit convention, because a
   squash merge uses it as the commit subject. Defaults to the theme.
 - `rationale`: one or two lines, shown in `plan.md` and in the PR body.
+- `tier`: `light`, `standard` or `complex`. Defaults to `standard`.
 - `items`: ids as strings. Every open item appears in exactly one batch.
 - `depends_on`: batch numbers (1-based position in `batches`), earlier only.
 - `unclear`: items that need a research pass, each with one precise question.
 
-`state.sh plan-apply` validates the plan, writes `plan.md`, and with
+`state.sh plan-apply` validates the plan, writes `plan.md` with each batch's
+model, and with
 `--plan-only` halts the run so the plan can be reviewed.

@@ -134,7 +134,7 @@ decision="$(jq -r '
   | [.batches[] | select(.status == "merged" or .status == "closed"
       or (.status == "blocked" and .retry_of != null)) | .id] as $ok
   | ([.batches[] | select(.phase == "working")] | length) as $running
-  | (.config.limits.parallel_batches // 2) as $par
+  | (.config.limits.parallel_batches // 4) as $par
   | [.batches | sort_by(.order)[] | select(.status == "todo")
       | select(all(.depends_on[]; . as $d | any($ok[]; . == $d)))] as $eligible
   | [.batches | sort_by(.order)[] | select(.status == "in-progress" and .phase == "implement")] as $again
@@ -156,9 +156,9 @@ decision="$(jq -r '
     elif first_batch(.phase == "fix") then "fix_ci\t\(first_batch(.phase == "fix").id)"
     elif first_batch(.phase == "ci-rerun") then "rerun_ci\t\(first_batch(.phase == "ci-rerun").id)"
     elif first_batch(.phase == "open-pr") then "open_pr\t\(first_batch(.phase == "open-pr").id)"
-    elif $research then "research\t\($research.id)"
     elif ($ready | length) > 0 and $running < $par
       then "implement_batch\t\([$ready[:($par - $running)][] | .id | tostring] | join(","))"
+    elif $research then "research\t\($research.id)"
     elif first_batch(.phase == "ci") then "wait_ci\t\(first_batch(.phase == "ci").id)"
     elif $running > 0 then "wait_worker\t\([.batches[] | select(.phase == "working") | .id | tostring] | join(","))"
     elif .config.source == "file" and (.run.sync == null)
@@ -185,14 +185,20 @@ fi
 
 base="$(bl_cfg base_branch)"
 method="$(bl_cfg merge_method)"
-SPAWN='Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree". Pass the printed prompt verbatim as the prompt.'
+# spawn <batch>: the worker spawn instruction, with the model of the batch tier.
+spawn() {
+  local model
+  model="$(bl_batch_model "$1")"
+  if [ "$model" = "inherit" ]; then model=""; else model=", model \"$model\""; fi
+  printf 'Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree"%s. Pass the printed prompt verbatim as the prompt.' "$model"
+}
 
 case "$action" in
   plan)
     emit plan "Cluster the open items into themed batches." --arg plan_file "$BL_DIR/plan.json" <<EOT
 Run: $S/state.sh items   to list the open items. Read each item in full before clustering.
 Read $BL_SKILL_DIR/reference/batching.md and follow it.
-Write the plan to $BL_DIR/plan.json as {"batches":[{"theme":"...","title":"<PR title in the repo's commit convention>","rationale":"...","items":["<id>"],"depends_on":[<earlier batch number>]}],"unclear":[{"id":"<id>","question":"..."}]}.
+Write the plan to $BL_DIR/plan.json as {"batches":[{"theme":"...","title":"<PR title in the repo's commit convention>","rationale":"...","tier":"<light|standard|complex>","items":["<id>"],"depends_on":[<earlier batch number>]}],"unclear":[{"id":"<id>","question":"..."}]}.
 Run: $S/state.sh plan-apply $BL_DIR/plan.json   and fix the plan if it is rejected.
 EOT
     ;;
@@ -246,7 +252,7 @@ EOT
       --argjson batch "$target" --arg branch "$(bq "$target" '.branch')" <<EOT
 Run: $S/state.sh cleanup $target
 Run: $S/state.sh worker-prompt $target --mode conflict
-$SPAWN
+$(spawn "$target")
 If the worker reports the conflict resolved and pushed, run: $S/state.sh record conflict-resolved $target
 Otherwise run: $S/state.sh record conflict-failed $target
 EOT
@@ -258,7 +264,7 @@ EOT
       --arg item "$target" --argjson batch "$b" --arg branch "$(bq "$b" '.branch')" <<EOT
 Run: $S/state.sh cleanup $b
 Run: $S/state.sh worker-prompt $b --mode drop --item $target
-$SPAWN
+$(spawn "$b")
 Run: $S/state.sh record item-dropped $target
 EOT
     ;;
@@ -285,7 +291,7 @@ Reason about the cause. Read $BL_SKILL_DIR/reference/failures.md if the cause is
 If one item is the cause and the rest is sound, run: $S/state.sh record poison $target <item id> --reason "<cause>"   and stop here.
 Otherwise run: $S/state.sh cleanup $target
 Run: $S/state.sh worker-prompt $target --mode fix   and append your diagnosis and the relevant log lines to the printed prompt.
-$SPAWN
+$(spawn "$target")
 Run: $S/state.sh record fix-pushed $target
 EOT
         ;;
@@ -310,7 +316,7 @@ EOT
     emit research "Item $(bl_ref "$target") is unclear: $(iq "$target" '.question // ""')" --arg item "$target" \
       --arg decision_file "$BL_DIR/decisions/$target.md" <<EOT
 Run: $S/state.sh research-prompt $target
-Spawn one research agent: Agent tool, subagent_type "Explore". Pass the printed prompt verbatim. One pass only.
+Spawn one research agent: Agent tool, subagent_type "Explore"$(m="$(bl_tier_model light)"; [ "$m" = "inherit" ] || printf ', model "%s"' "$m"). Pass the printed prompt verbatim. One pass only.
 Read $BL_SKILL_DIR/reference/research.md and write the decision record to $BL_DIR/decisions/$target.md using its template.
 If the agent returns nothing useful, decide yourself from the codebase and set confidence low. Never ask the user.
 Run: $S/state.sh record decision $target --confidence <high|medium|low>
@@ -325,7 +331,7 @@ EOT
         IFS="$old_ifs"
         printf 'Batch %s: run: %s/state.sh record worker-started %s\n' "$b" "$S" "$b"
         printf 'Batch %s: run: %s/state.sh worker-prompt %s\n' "$b" "$S" "$b"
-        printf 'Batch %s: %s\n' "$b" "$SPAWN"
+        printf 'Batch %s: %s\n' "$b" "$(spawn "$b")"
       done
       IFS="$old_ifs"
       printf 'Start the workers of all listed batches in one message so they run in parallel.\n'
@@ -333,10 +339,15 @@ EOT
       printf 'For each item it calls a hard blocker (missing credentials or access, destructive or irreversible operation) run: %s/state.sh record hard-blocker <item> --reason "<reason>"\n' "$S"
       printf 'Then run: %s/state.sh record worker-done <batch>   (it checks the pushed branch, not the report).\n' "$S"
       printf 'If a worker crashed or returned nothing, run: %s/state.sh record worker-failed <batch> --reason "<what happened>"\n' "$S"
-    } | emit implement_batch "Implement batch(es) $target, each in its own worktree." \
+    } | emit implement_batch "Implement batch(es) $target, each in its own worktree: $(
+      jq -r --argjson ids "[$target]" "$BL_JQ_MODEL"'.config as $cfg
+        | [.batches[] | select(.id as $b | any($ids[]; . == $b)) | "batch \(.id) on \(tier_model($cfg; batch_tier))"]
+        | join(", ")' "$BL_STATE")." \
       --argjson batches "[$target]" \
-      --argjson detail "$(jq -c --argjson ids "[$target]" '[.batches[] | select(.id as $b | any($ids[]; . == $b))
-        | {batch: .id, theme, items, mode: (if .pushed then "continue" else "fresh" end)}]' "$BL_STATE")"
+      --argjson detail "$(jq -c --argjson ids "[$target]" "$BL_JQ_MODEL"'.config as $cfg
+        | [.batches[] | select(.id as $b | any($ids[]; . == $b))
+        | {batch: .id, theme, items, tier: batch_tier, model: tier_model($cfg; batch_tier),
+           mode: (if .pushed then "continue" else "fresh" end)}]' "$BL_STATE")"
     ;;
 
   wait_ci)

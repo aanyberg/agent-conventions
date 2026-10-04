@@ -172,6 +172,20 @@ out="$("$S/preflight.sh" --session dry --gitignore 2>&1)"
 assert_contains "--gitignore writes .gitignore" ".planning/backlog-loop/" "$(cat .gitignore)"
 assert_eq "probes never run the test suite" "git status --short|gh auth status|" "$("$S/preflight.sh" --probes | tr '\n' '|')"
 assert_eq "no test command is configured or stored" "null" "$(jq -r '.test // "null"' "$DIR/config.json")"
+assert_eq "four batches run in parallel by default" "4" "$(jq -r '.limits.parallel_batches' "$DIR/config.json")"
+assert_eq "default models per tier" "haiku,sonnet,opus" "$(jq -r '[.models.light, .models.standard, .models.complex] | join(",")' "$DIR/config.json")"
+
+new_repo
+printf -- '- model-complex: fable\n' >>CLAUDE.md
+git commit -q -am "model config" && git update-ref refs/remotes/origin/main HEAD
+"$S/preflight.sh" --session dry >/dev/null 2>&1
+assert_eq "a configured model is stored" "fable" "$(jq -r '.models.complex' "$DIR/config.json")"
+
+new_repo
+printf -- '- model-light: gpt\n' >>CLAUDE.md
+git commit -q -am "bad model" && git update-ref refs/remotes/origin/main HEAD
+out="$("$S/preflight.sh" --session dry 2>&1)"
+assert_contains "an unknown model is reported" "model-light must be haiku, sonnet, opus, fable or inherit, not 'gpt'" "$out"
 
 # ------------------------------------------------------------------------------------
 echo "scenario: flaky CI passes after one rerun"

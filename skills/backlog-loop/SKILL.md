@@ -75,13 +75,16 @@ Arguments of this invocation: `$ARGUMENTS`
 ## Workers
 
 - Implementation, fixes, conflict resolution and drops: Agent tool,
-  `subagent_type: "general-purpose"`, `isolation: "worktree"`. The prompt is
+  `subagent_type: "general-purpose"`, `isolation: "worktree"`, and the `model`
+  the action names for the batch's tier (none when it names none). The prompt is
   the verbatim output of `state.sh worker-prompt`, plus your diagnosis when the
   action asks for it.
-- Research: Agent tool, `subagent_type: "Explore"`, prompt from
+- Research: Agent tool, `subagent_type: "Explore"`, the `model` the action
+  names, prompt from
   `state.sh research-prompt`. One pass per question.
 - When an action lists several batches, start their workers in one message so
   they run in parallel. Never more than the action lists.
+- Tell the user which model each worker runs on, as the action summary states.
 - If workers run in the background, end your turn after starting them. Their
   completion notification brings you back; then run `next.sh`.
 - Nothing is tested locally, by you or by workers. CI on the pull request is

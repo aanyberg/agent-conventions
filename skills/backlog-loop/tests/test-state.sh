@@ -43,6 +43,17 @@ assert_contains "valid plan is applied" "Plan applied: 2 batches" "$out"
 assert_eq "items point at their batch" "1,1,2,2,2" "$(sget '[.items[].batch | tostring] | join(",")')"
 assert_eq "unclear items are queued for research" "pending" "$(sget '.items[] | select(.id == "4") | .research')"
 assert_contains "plan.md is written" "## Batch 2: B" "$(cat "$STATE_DIR/plan.md")"
+assert_eq "a batch without a tier is standard" "standard,standard" "$(sget '[.batches[].tier] | join(",")')"
+assert_contains "plan.md names the model of a standard batch" "Model: sonnet (standard tier)" "$(cat "$STATE_DIR/plan.md")"
+use_state base.json "$fresh"
+plan '{"batches":[{"theme":"A","tier":"light","items":["1","2"]},{"theme":"B","tier":"complex","items":["3","4","5"]}]}' >/dev/null
+assert_contains "plan.md names the model of a light batch" "Model: haiku (light tier)" "$(cat "$STATE_DIR/plan.md")"
+assert_contains "plan.md names the model of a complex batch" "Model: opus (complex tier)" "$(cat "$STATE_DIR/plan.md")"
+use_state base.json "$fresh | .config.models = {standard: \"opus\"}"
+plan '{"batches":[{"theme":"A","items":["1","2","3","4","5"]}]}' >/dev/null
+assert_contains "a configured model replaces the default" "Model: opus (standard tier)" "$(cat "$STATE_DIR/plan.md")"
+use_state base.json "$fresh"
+assert_contains "plan with an unknown tier is rejected" "batch 1 has tier 'huge'; use light, standard or complex" "$(plan '{"batches":[{"theme":"A","tier":"huge","items":["1","2","3","4","5"]}]}')"
 use_state base.json "$fresh"
 assert_contains "plan missing an item is rejected" "item 5 is in 0 batches" "$(plan '{"batches":[{"theme":"A","items":["1","2","3","4"]}]}')"
 assert_contains "plan with an item twice is rejected" "item 1 is in 2 batches" "$(plan '{"batches":[{"theme":"A","items":["1","2","3","4","5"]},{"theme":"B","items":["1"]}]}')"
@@ -251,5 +262,6 @@ assert_contains "report: review" "Review:  #4 decided with low confidence, see d
 assert_contains "report: retries" "Retries: batch 1 (1 fix), batch 2 (1 CI rerun)" "$report"
 assert_contains "report: path" "Report:  .planning/backlog-loop/report.md" "$report"
 assert_eq "report.md is written" "yes" "$([ -s "$STATE_DIR/report.md" ] && echo yes)"
+assert_contains "report.md names each batch's model" '- Batch 1 "Greeting" (sonnet): merged' "$(cat "$STATE_DIR/report.md")"
 
 t_summary

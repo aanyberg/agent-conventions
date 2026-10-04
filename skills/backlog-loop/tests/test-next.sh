@@ -24,6 +24,9 @@ def batches($ids; f): .batches |= map(if (.id as $i | any($ids[]; . == $i)) then
 def items($ids; f): .items |= map(if (.id as $i | any($ids[]; . == $i)) then f else . end);
 '
 
+# instr: the instruction lines of the last action, unescaped.
+instr() { printf '%s' "$LAST" | jq -r '.instructions[]'; }
+
 # expect <name> <jq filter> <expected action> [peek|run]
 expect() {
   local name="$1" filter="$2" want="$3" mode="${4:-peek}" out count got
@@ -77,8 +80,33 @@ assert_eq "parallel limit of 1 starts one batch" "[1]" "$(printf '%s' "$LAST" | 
 expect "batch back in implement -> implement_batch" 'inprog(1; "implement") | merged(2) | batch(1; .pr = null)' implement_batch
 expect "dependency merged -> dependent batch starts" 'merged(1) | merged(2)' implement_batch
 assert_eq "the dependent batch is the one started" "[3]" "$(printf '%s' "$LAST" | jq -c '.batches')"
-expect "unclear item in a startable batch -> research" 'item("1"; .research = "pending" | .question = "which?")' research
+expect "unclear item, another batch ready -> start the ready batch first" 'item("1"; .research = "pending" | .question = "which?")' implement_batch
+assert_eq "the batch waiting on research is not started" "[2]" "$(printf '%s' "$LAST" | jq -c '.batches')"
+expect "unclear item, nothing else to start -> research" 'item("1"; .research = "pending" | .question = "which?") | inprog(2; "working") | batch(2; .pr = null)' research
 assert_eq "research names the item" "1" "$(printf '%s' "$LAST" | jq -r '.item')"
+assert_contains "research runs on the light model" 'subagent_type "Explore", model "haiku"' "$(instr)"
+expect "research uses a configured light model" 'item("1"; .research = "pending" | .question = "which?") | inprog(2; "working") | batch(2; .pr = null) | .config.models = {light: "sonnet"}' research
+assert_contains "research runs on the configured light model" 'model "sonnet"' "$(instr)"
+
+echo "next.sh: models"
+expect "standard batches -> sonnet workers" '.' implement_batch
+assert_eq "the action lists each batch's tier and model" '[["standard","sonnet"],["standard","sonnet"]]' "$(printf '%s' "$LAST" | jq -c '[.detail[] | [.tier, .model]]')"
+assert_contains "the summary names the models" "batch 1 on sonnet, batch 2 on sonnet" "$(printf '%s' "$LAST" | jq -r '.summary')"
+assert_contains "the spawn instruction names the model" 'Batch 1: Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree", model "sonnet"' "$(instr)"
+expect "light and complex batches -> haiku and opus workers" 'batch(1; .tier = "light") | batch(2; .tier = "complex")' implement_batch
+assert_contains "a light batch spawns haiku" 'Batch 1: Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree", model "haiku"' "$(instr)"
+assert_contains "a complex batch spawns opus" 'Batch 2: Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree", model "opus"' "$(instr)"
+expect "configured model -> that model" '.config.models = {standard: "opus"}' implement_batch
+assert_contains "the configured model is spawned" 'Batch 1: Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree", model "opus"' "$(instr)"
+expect "inherit -> no model is passed" '.config.models = {standard: "inherit"}' implement_batch
+assert_contains "an inherited model is spawned without a model" 'Batch 1: Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree". Pass' "$(instr)"
+assert_contains "the summary says the model is inherited" "batch 1 on inherit" "$(printf '%s' "$LAST" | jq -r '.summary')"
+expect "fix worker uses the batch model" 'merged(2) | inprog(1; "fix") | batch(1; .tier = "complex" | .last_error = "CI red: ci")' fix_ci
+assert_contains "fix_ci spawns the batch model" 'model "opus"' "$(instr)"
+expect "conflict worker uses the batch model" 'merged(2) | inprog(1; "conflict") | batch(1; .tier = "light")' resolve_conflict
+assert_contains "resolve_conflict spawns the batch model" 'model "haiku"' "$(instr)"
+expect "drop worker uses the batch model" 'merged(2) | inprog(1; "fix") | batch(1; .tier = "complex") | item("1"; .pending = "drop")' drop_item
+assert_contains "drop_item spawns the batch model" 'model "opus"' "$(instr)"
 
 echo "next.sh: one action per batch phase"
 expect "phase open-pr -> open_pr" 'merged(2) | inprog(1; "open-pr") | batch(1; .pr = null)' open_pr

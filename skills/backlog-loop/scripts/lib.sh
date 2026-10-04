@@ -101,6 +101,17 @@ bl_hash() {
 bl_cfg() { jq -r --arg k "$1" '.config[$k] // empty' "$BL_STATE"; }
 bl_limit() { jq -r --arg k "$1" '.config.limits[$k] // empty' "$BL_STATE"; }
 
+# Worker model per batch tier. The config may override each tier; "inherit"
+# means the worker runs on the orchestrator's model.
+BL_TIERS="light standard complex"
+BL_JQ_MODEL='
+def tier_model($cfg; $tier): ($cfg.models[$tier] // {light: "haiku", standard: "sonnet", complex: "opus"}[$tier]);
+def batch_tier: .tier // "standard";'
+bl_tier_model() { jq -r --arg t "$1" "$BL_JQ_MODEL"'tier_model(.config; $t)' "$BL_STATE"; }
+bl_batch_model() {
+  jq -r --argjson b "$1" "$BL_JQ_MODEL"'. as $s | .batches[] | select(.id == $b) | tier_model($s.config; batch_tier)' "$BL_STATE"
+}
+
 # Item ids are plain numbers for GitHub and free-form for BACKLOG.md.
 bl_ref() {
   if [ "$(bl_cfg source)" = "github" ]; then printf '#%s' "$1"; else printf '%s' "$1"; fi

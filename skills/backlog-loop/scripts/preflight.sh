@@ -145,6 +145,12 @@ fi
 case "$C_SOURCE" in github | file | "") ;; *) config_errors="$config_errors source must be github or file, not '$C_SOURCE';" ;; esac
 case "$C_METHOD" in squash | merge | rebase) ;; *) config_errors="$config_errors merge-method must be squash, merge or rebase;" ;; esac
 [ -n "$C_BASE" ] || config_errors="$config_errors base-branch could not be detected;"
+for tier in $BL_TIERS; do
+  m="$(cfg_raw "model-$tier")"
+  case "$m" in "" | haiku | sonnet | opus | fable | inherit) ;;
+    *) config_errors="$config_errors model-$tier must be haiku, sonnet, opus, fable or inherit, not '$m';" ;;
+  esac
+done
 
 config_errors="${config_errors# }"
 
@@ -487,12 +493,17 @@ jq -n --arg source "$C_SOURCE" --arg lbl "$C_LABEL" --arg path "$C_PATH" --arg b
   --arg repo "$REPO" --arg method "$C_METHOD" --argjson web "$RESEARCH_WEB" \
   --argjson max_attempts "$(limit max-attempts 3)" --argjson ci_reruns "$(limit ci-reruns 1)" \
   --argjson ci_wait "$(limit ci-wait-minutes 45)" --argjson research "$(limit research-passes 1)" \
-  --argjson parallel "$(limit parallel-batches 2)" --argjson stall "$(limit stall-threshold 2)" \
+  --argjson parallel "$(limit parallel-batches 4)" --argjson stall "$(limit stall-threshold 2)" \
   --argjson iterations "$(limit max-iterations 100)" --argjson hours "$(limit max-hours 12)" \
   --argjson worker "$(limit worker-wait-minutes 120)" \
-  --argjson batch_items "$(limit max-batch-items 15)" '
+  --argjson batch_items "$(limit max-batch-items 15)" \
+  --arg m_light "$(cfg_raw model-light)" --arg m_standard "$(cfg_raw model-standard)" \
+  --arg m_complex "$(cfg_raw model-complex)" '
   { source: $source, "label": $lbl, path: $path, base_branch: $base, repo: $repo,
     merge_method: $method, research_web: $web,
+    models: { light: ($m_light | if . == "" then "haiku" else . end),
+              standard: ($m_standard | if . == "" then "sonnet" else . end),
+              complex: ($m_complex | if . == "" then "opus" else . end) },
     limits: { max_attempts: $max_attempts, ci_reruns: $ci_reruns, ci_wait_minutes: $ci_wait,
               research_passes: $research, parallel_batches: $parallel, stall_threshold: $stall,
               max_iterations: $iterations, max_hours: $hours, worker_wait_minutes: $worker,

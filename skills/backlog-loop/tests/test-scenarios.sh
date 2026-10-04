@@ -85,7 +85,7 @@ next() {
 
 # Do the routine part of an action. Returns 1 for actions a scenario must handle.
 auto() {
-  local b pre cmd
+  local pre cmd
   case "$ACTION" in
     implement_items) for i in $(printf '%s' "$OUT" | jq -r '.items[]'); do implement "$i" || return 2; done ;;
     integrate) "$S/state.sh" integrate "$TARGET" >/dev/null ;;
@@ -376,6 +376,7 @@ assert_eq "two batches, two PRs" "2" "$(jq '.prs | length' "$GH")"
 # ------------------------------------------------------------------------------------
 echo "scenario: two items of a batch conflict, the apply worker resolves it"
 new_repo
+# shellcheck disable=SC2317,SC2329
 item_snippet() {
   case "$1" in
     1 | 2) printf "echo 'written by item %s' > shared.txt;" "$1" ;;
@@ -419,6 +420,7 @@ assert_eq "its items moved to batch 2" "2/2" "$(iq 1 '.batch')/$(iq 2 '.batch')"
 echo "scenario: batch-commits squashed"
 new_repo
 printf -- '- batch-commits: squashed\n' >>CLAUDE.md && git commit -q -am "squash" && git update-ref refs/remotes/origin/main HEAD
+# shellcheck disable=SC2317,SC2329
 item_snippet() { printf "echo 'feature %s' > feature-%s.txt;" "$1" "$1"; }
 start "$ONE" && run_until open_pr
 branch="$(bq 1 '.branch')"
@@ -430,6 +432,7 @@ assert_eq "the run finishes" "done/5" "$ACTION/$(jq '[.items[] | select(.status 
 # ------------------------------------------------------------------------------------
 echo "scenario: base branch red after a merge"
 new_repo
+# shellcheck disable=SC2317,SC2329
 item_snippet() {
   printf "echo 'feature %s' > feature-%s.txt;" "$1" "$1"
   [ "$1" != "1" ] || printf " touch .ci-fail-base;"

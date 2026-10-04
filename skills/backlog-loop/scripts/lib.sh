@@ -103,6 +103,7 @@ bl_limit() { jq -r --arg k "$1" '.config.limits[$k] // empty' "$BL_STATE"; }
 
 # Worker model per batch tier. The config may override each tier; "inherit"
 # means the worker runs on the orchestrator's model.
+# shellcheck disable=SC2034 # used by preflight.sh
 BL_TIERS="light standard complex"
 BL_JQ_MODEL='
 def tier_model($cfg; $tier): ($cfg.models[$tier] // {light: "haiku", standard: "sonnet", complex: "opus"}[$tier]);

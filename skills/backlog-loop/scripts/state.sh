@@ -644,7 +644,7 @@ record_item_done() {
     n="$(git -C "$BL_ROOT" rev-list --count "origin/$base..refs/heads/$branch" 2>/dev/null || echo 0)"
     if [ "$n" != "1" ]; then
       item_unusable "$i" "no commit: expected one commit on $branch, found $n"
-    elif ! git -C "$BL_ROOT" log -1 --format=%B "refs/heads/$branch" | grep -qxE "Backlog-Item:[[:space:]]*$i[[:space:]]*"; then
+    elif ! git -C "$BL_ROOT" log -1 --format=%B "refs/heads/$branch" | grep -qxE "Backlog-Item:[[:space:]]*${i}[[:space:]]*"; then
       item_unusable "$i" "no commit with trailer Backlog-Item: $i on $branch"
     else
       upd --arg i "$i" "$JQ_DEFS"'set_item($i; .phase = "done" | .worker_started_at = null)'
@@ -727,14 +727,14 @@ cmd_integrate() {
   done
   if [ "$(bl_cfg batch_commits)" = "squashed" ]; then squash_worktree "$wt" "$b" || bl_log "integrate: squash failed for batch $b"; fi
   git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
-  upd --argjson b "$b" --arg branch "$branch" --argjson applied "$(printf '%s\n' $applied | ids_json)" \
-    --argjson conflicts "$(printf '%s\n' $conflicts | ids_json)" "$JQ_DEFS"'
+  upd --argjson b "$b" --arg branch "$branch" --argjson applied "$(printf '%s' "$applied" | tr ' ' '\n' | ids_json)" \
+    --argjson conflicts "$(printf '%s' "$conflicts" | tr ' ' '\n' | ids_json)" "$JQ_DEFS"'
     set_items($b; if has_id($applied; .id) then .phase = "applied" elif has_id($conflicts; .id) then .phase = "conflict" else . end)
     | set_batch($b; .branch = $branch | .pushed = false
         | .phase = (if ($conflicts | length) > 0 then "apply" else "open-pr" end))'
   bl_log "integrate batch=$b branch=$branch applied=[$applied ] conflicts=[$conflicts ]"
-  printf 'Batch %s: %s applied, %s conflicting, phase %s.\n' "$b" "$(printf '%s\n' $applied | grep -c .)" \
-    "$(printf '%s\n' $conflicts | grep -c .)" "$(bq "$b" '.phase')"
+  printf 'Batch %s: %s applied, %s conflicting, phase %s.\n' "$b" "$(printf '%s' "$applied" | wc -w | tr -d ' ')" \
+    "$(printf '%s' "$conflicts" | wc -w | tr -d ' ')" "$(bq "$b" '.phase')"
 }
 
 record_apply_started() {
@@ -767,7 +767,7 @@ record_apply_done() {
   b="$(iq "$i" '.batch')"
   branch="$(bq "$b" '.branch')"
   base="$(bl_cfg base_branch)"
-  if git -C "$BL_ROOT" log --format=%B "origin/$base..refs/heads/$branch" 2>/dev/null | grep -qxE "Backlog-Item:[[:space:]]*$i[[:space:]]*"; then
+  if git -C "$BL_ROOT" log --format=%B "origin/$base..refs/heads/$branch" 2>/dev/null | grep -qxE "Backlog-Item:[[:space:]]*${i}[[:space:]]*"; then
     upd --arg i "$i" "$JQ_DEFS"'set_item($i; .phase = "applied" | .worker_started_at = null)'
     bl_log "apply-done item=$i batch=$b"
   else

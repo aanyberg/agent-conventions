@@ -247,7 +247,7 @@ assert_eq "the blocked batch's branch is removed from the remote when the run is
   "$(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/backlog-loop/*' | tr '\n' ' ')"
 git branch -q worktree-agent-stray origin/main
 git commit -q --allow-empty -m "unmerged work" && git branch -q worktree-agent-keep && git reset -q --hard origin/main
-"$S/state.sh" record run done "" 2>/dev/null
+"$S/state.sh" record run "done" 2>/dev/null
 assert_eq "merged-in worker worktree branches are removed, ones with own commits are kept" "worktree-agent-keep" \
   "$(git for-each-ref --format='%(refname:short)' 'refs/heads/worktree-*' | tr '\n' ' ' | sed 's/ $//')"
 case "$(git ls-tree -r --name-only origin/main | tr '\n' ' ')" in

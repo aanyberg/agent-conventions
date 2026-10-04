@@ -1026,7 +1026,7 @@ cmd_purge_logs() {
   need_state
   [ "$(bl_get '.run.status')" = "done" ] || return 0
   rm -rf "$BL_DIR/run.log" "$BL_DIR/prompts" "$BL_DIR/pr-body.md" "$BL_DIR/plan.json" \
-    "$BL_DIR/sync-edits.tsv" "$BL_DIR/checks.out" "$BL_DIR"/gate.out.* "$BL_DIR"/state.json.tmp.*
+    "$BL_DIR/sync-edits.tsv" "$BL_DIR/checks.out"
 }
 
 record_run() {

@@ -278,9 +278,10 @@ assert_contains "report: blocked reason" "Reason: the billing API rejects calls 
 assert_contains "report: review line" "decided with low confidence, see decisions/4.md" "$report"
 assert_contains "report: retries" "batch 2 (1 fix, 1 CI rerun)" "$report"
 assert_eq "report.md is written" "yes" "$([ -s "$DIR/report.md" ] && echo yes)"
-assert_eq "a finished run keeps report and state, not logs and prompts" "state.json report.md plan.md | gone gone gone" \
-  "$(cd "$DIR" && ls state.json report.md plan.md | tr '\n' ' ')| $([ -e run.log ] || echo gone) $([ -e prompts ] || echo gone) $([ -e pr-body.md ] || echo gone)"
-assert_eq "a later report still works and leaves no log behind" "gone" "$("$S/report.sh" >/dev/null; [ -e "$DIR/run.log" ] || echo gone)"
+exists() { if [ -e "$DIR/$1" ]; then echo kept; else echo gone; fi; }
+assert_eq "a finished run keeps state, report and plan" "kept kept kept" "$(exists state.json) $(exists report.md) $(exists plan.md)"
+assert_eq "a finished run drops logs, prompts and working files" "gone gone gone" "$(exists run.log) $(exists prompts) $(exists pr-body.md)"
+assert_eq "a later report still works and leaves no log behind" "gone" "$("$S/report.sh" >/dev/null; exists run.log)"
 
 GH="$DIR/dry-run/gh.json"
 if [ "$SOURCE" = "github" ]; then

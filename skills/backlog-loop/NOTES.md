@@ -156,3 +156,124 @@ guarded, because jq 1.6 exits 0 there.
   `reference/implementer.md` can become a bundled subagent definition without
   touching the scripts.
 - `state.json` carries `version: 1`.
+
+## 6. Parallel items per batch
+
+**Status:** accepted and built, 2026-10-04. Where sections 3 and 5 describe
+batch workers, `depends_on`, `parallel-batches` or `version: 1`, this section
+replaces them.
+
+### Context
+
+A batch has one worker that implements its items one after another. Several
+batches run at once, but a plan with one large batch, or a chain of dependent
+batches, runs a single worker. A trial run showed exactly that bottleneck.
+Subagents cannot start subagents, so a worker cannot split its batch.
+
+What must hold:
+
+- One CI run per batch, not per item.
+- One commit per item inside the PR, so a single item can still be dropped.
+- Scripts decide and verify; the agent only executes (section 3, Loop).
+
+### Decision
+
+Batches run one at a time, in plan order. The items of a batch run in
+parallel, one worker each.
+
+```mermaid
+flowchart LR
+    A["implement items<br/>one worker per item"] --> B["integrate<br/>cherry-pick onto batch branch"]
+    B -->|conflict| C["apply item<br/>one worker, one attempt"]
+    C --> B
+    B --> D[open PR]
+    D --> E[CI, fix, merge, verify<br/>as today]
+    E --> F([next batch])
+```
+
+1. **Implement items.** One worker per item, at most `parallel-items` at once
+   (replaces `parallel-batches`; default 5). Each worker branches from
+   `origin/<base>` as `backlog-loop/<run>/b<batch>/i<item>-t<try>`, makes one
+   commit with the `Backlog-Item` trailer, and does not push. Worktrees share
+   the repository's refs, so the commit is visible from the main checkout.
+   `state.sh record item-done <item>` checks that local branch: exactly one
+   commit ahead of `origin/<base>`, with the right trailer.
+2. **Integrate.** When every item of the batch has finished or failed,
+   `state.sh integrate <batch>` builds the batch branch from `origin/<base>`
+   in a scratch worktree and cherry-picks the finished items in plan order.
+   The branch stays local. A cherry-pick that conflicts is aborted and the
+   item is marked for the next step; the others continue.
+3. **Apply a conflicting item.** One worker per conflicting item, one at a
+   time, on the local batch branch: it applies the item's change by hand and
+   commits with the trailer. If it fails, the item is deferred.
+4. **Open the PR** once no item is waiting: `state.sh open-pr` pushes the
+   batch branch, the only push of the batch, and creates the PR. From here the
+   batch follows the existing path: CI wait, rerun, fix, drop, update from
+   base, merge, verify.
+5. **Next batch** starts after the merge is verified. Research for the next
+   batch's unclear items may run while the current batch waits for CI.
+
+**Deferral.** A deferred item moves to the next batch, or to a new last batch.
+A failed worker (no commit, crash, past `worker-wait-minutes`) and a failed
+apply each count one attempt; three attempts block the item, as today. A
+batch whose items were all deferred or blocked closes without a PR.
+
+**Dependencies are per item.** Plan items are an id or
+`{"id": "15", "tier": "light", "needs": ["12"]}`. An item starts only when
+every item in `needs` is merged; otherwise it is deferred without counting an
+attempt. If a needed item is blocked, the item is blocked with that reason.
+Batch `depends_on` is removed: batches are sequential, so each one builds on
+everything merged before it.
+
+**Model per item.** `tier` on the batch is the default and an item may
+override it. Fix and drop workers act on the whole batch and use the highest
+tier among its items.
+
+**Project agents.** Optional keys `agent-light`, `agent-standard` and
+`agent-complex` name a subagent type (for example a project's
+`.claude/agents/backlog-worker.md`). When set, the worker is spawned with that
+`subagent_type` and no `model`, so the agent file decides model, effort and
+tools. Without them the worker is `general-purpose` with the tier's model.
+Preflight warns when a named agent file is not found in the project or user
+agent directory. The skill ships no agent files.
+
+**Commit shape.** `batch-commits: per-item` (default) or `squashed`. With
+`squashed`, `integrate` (and `open-pr`, after apply workers) folds the applied
+items into one commit carrying every
+`Backlog-Item` trailer. Dropping a single item is then impossible: a red CI is
+fixed by a worker or, after the attempts run out, blocks the batch's items.
+With the default squash merge both shapes land on the base branch as one
+commit; the option only changes the PR history.
+
+**Unchanged:** the guard, the Stop gate, CI as the only test gate, the merge
+and revert path, `--no-merge`, reporting. Under `--no-merge` every batch
+builds on the previous one, so the run halts after each green PR until the
+user merges.
+
+### Alternatives considered
+
+| Option | Why not |
+|---|---|
+| Keep one worker per batch, plan smaller batches | Parallel only across batches; each batch costs a CI run, and dependent items still serialise. |
+| A prompt-driven `/loop` with more context | Attempt counting, the READY check before merge, revert on a red base and resume after compaction would move from scripts into the prompt. |
+| One PR per item | One CI run per item, which is what batching avoids. |
+| Workers commit to one shared batch branch | Concurrent pushes to one branch race; each would need a rebase, which the guard forbids without force-push. |
+| Parallel items as an option next to the current model | Two state machines, every transition and test twice. |
+| Pipeline: start the next batch while the current one is in CI | Its items would build on unmerged code. Rejected for now; batches merge in order. |
+
+### Consequences
+
+- A batch of ten independent items takes about as long as its slowest item,
+  then one CI run.
+- Batches no longer overlap, so CI waits add up: fewer, larger batches pay
+  off. `batching.md` changes from "cluster by theme" to "group independent
+  items; put an item after the items it needs".
+- More agent sessions: each worker reads the code it touches on its own.
+- Items in one batch that edit the same lines now conflict at integration.
+  The planner should keep them apart; the apply step and deferral catch the
+  rest.
+- `state.json` moves to `version: 2`. A run started with version 1 cannot be
+  resumed by the new scripts; preflight says so and asks to finish it with
+  the previous version or start a new run.
+- To verify when building: a branch committed inside an Agent worktree stays
+  visible from the main checkout after the worktree is cleaned up.

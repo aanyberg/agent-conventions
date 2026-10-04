@@ -6,9 +6,9 @@ subagent from the sections below: `common`, then one mode section, then
 printed prompt verbatim to a `general-purpose` subagent with worktree
 isolation. Edit the wording here; the scripts only read the section markers.
 
-Modes: `implement` (fresh branch), `continue` (branch exists, items remain),
-`fix` (CI is red), `conflict` (branch conflicts with base), `drop` (remove one
-item from the branch).
+Modes: `item` (one item on its own local branch), `apply` (put a conflicting
+item onto the local batch branch), `fix` (CI is red), `conflict` (branch
+conflicts with base), `drop` (remove one item from the branch).
 
 <!-- BEGIN common -->
 You are a worker for the backlog-loop run in this repository. You work alone in
@@ -16,7 +16,8 @@ your own git worktree. You cannot ask anyone questions: decide, or report.
 
 Rules that always apply:
 
-- Work only on branch `{{BRANCH}}`. Never commit to or push `{{BASE}}`.
+- Work only on the branch your task below names. Never commit to or push
+  `{{BASE}}`.
 - Never force-push. Never rewrite pushed commits. Add new commits instead.
 - Never touch `.planning/backlog-loop/` and never edit `{{BACKLOG_FILE}}`.
   The main agent records all status.
@@ -24,80 +25,73 @@ Rules that always apply:
   conventions already in the codebase and in CLAUDE.md or AGENTS.md.
 - Do not delete, skip or weaken existing tests to get green.
 - Do not run the test suite, the linter or the build. Testing happens only in
-  the repository's CI, on the pull request. Write the tests your change needs,
-  read the code carefully, and push; CI is the judge.
-- Push with `git push origin {{BRANCH}}`. Do not open a pull request.
+  the repository's CI, on the pull request. Write the tests your change needs
+  and read the code carefully; CI is the judge.
+- Push only when your task below says so. Do not open a pull request.
 <!-- END common -->
 
-<!-- BEGIN implement -->
+<!-- BEGIN item -->
 
-## Task: implement batch {{BATCH}} ({{THEME}})
+## Task: implement item {{ITEM}} of batch {{BATCH}} ({{THEME}})
 
-Start the branch from the current base branch:
+Other workers implement the other items of this batch at the same time, each
+on its own branch. Start your branch from the current base branch:
 
 ```bash
 git fetch origin {{BASE}}
-git checkout -B {{BRANCH}} origin/{{BASE}}
+git checkout -B {{ITEM_BRANCH}} origin/{{BASE}}
 ```
 
-Implement these items, in this order:
+Your item:
 
 {{ITEMS}}
-
-For each item:
 
 1. Read the item in full, then the code it touches and its tests.
-2. Implement it with tests that cover the new behaviour.
-3. Make exactly one commit for the item. Use the repository's commit message
-   convention and end the message with this trailer on its own line:
-   `Backlog-Item: <id>`
-   One commit per item lets a single item be reverted out of the batch.
+2. Implement it with tests that cover the new behaviour. Touch only what the
+   item needs: unrelated edits collide with the other workers' items.
+3. Make exactly one commit. Use the repository's commit message convention
+   and end the message with this trailer on its own line:
+   `Backlog-Item: {{ITEM}}`
+4. Do not push. The branch is local; the main agent reads it from the
+   repository and assembles the batch.
 
-If an item is ambiguous, underspecified, or has several valid approaches and
-no decision record below settles it: do not guess and do not stop. Skip that
-item, make no commit for it, finish the others, and report it as `unclear`
-with the precise question.
+If the item is ambiguous, underspecified, or has several valid approaches and
+no decision record below settles it: do not guess. Make no commit and report
+it as `unclear` with the precise question.
 
-If an item needs credentials or external access you do not have, or a
-destructive or irreversible operation, skip it and report it as `blocker`.
-Nothing else is a blocker.
+If the item needs credentials or external access you do not have, or a
+destructive or irreversible operation, make no commit and report it as
+`blocker`. Nothing else is a blocker.
 
 ## Decisions already made
 
 Treat these as requirements.
 
 {{DECISIONS}}
-<!-- END implement -->
+<!-- END item -->
 
-<!-- BEGIN continue -->
+<!-- BEGIN apply -->
 
-## Task: continue batch {{BATCH}} ({{THEME}})
+## Task: apply item {{ITEM}} onto batch {{BATCH}} ({{THEME}})
 
-The branch already exists on the remote with part of the batch. Continue on it:
+Item {{ITEM}} was implemented on its own branch, but its commit conflicts with
+the other items already on the batch branch. Apply it by hand:
 
 ```bash
-git fetch origin {{BRANCH}} {{BASE}}
-git checkout -B {{BRANCH}} origin/{{BRANCH}}
+git fetch origin {{BASE}}
+git checkout {{BRANCH}}
+git cherry-pick {{ITEM_BRANCH}}
 ```
 
-Implement only these remaining items:
+Resolve every conflict so that both sides keep their intent, then
+`git cherry-pick --continue`. Keep the original commit message, including the
+trailer `Backlog-Item: {{ITEM}}`. Do not push: the main agent pushes the batch
+branch once every item is on it.
 
-{{ITEMS}}
-
-For each item: read it in full, implement it with tests, and make exactly one
-commit that ends with the trailer `Backlog-Item: <id>` on its own line.
-
-An item that is still unclear after its decision record is not a blocker: take
-the smallest reversible reading of the decision and implement that. Report an
-item as `blocker` only for missing credentials or access, or a destructive or
-irreversible operation.
-
-## Decisions already made
-
-Treat these as requirements.
-
-{{DECISIONS}}
-<!-- END continue -->
+You get one attempt. If the conflict cannot be resolved cleanly, run
+`git cherry-pick --abort` and report `failed`; the item moves to the next
+batch, where it is built on top of this one.
+<!-- END apply -->
 
 <!-- BEGIN fix -->
 
@@ -171,12 +165,12 @@ Push. Do not change anything else.
 
 ## Report
 
-End with exactly this block. The main agent checks the pushed branch, not this
-text, so do not claim what you did not push.
+End with exactly this block. The main agent checks the branch, not this text,
+so do not claim what you did not commit.
 
 ```text
 RESULT: done | partial | failed
-BRANCH: {{BRANCH}}
+BRANCH: <the branch you worked on>
 ITEMS:
 - <id>: implemented <commit sha>
 - <id>: unclear: <the precise question>

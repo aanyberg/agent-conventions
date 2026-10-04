@@ -65,6 +65,29 @@ repository without CI fails preflight.
 | `path` | `BACKLOG.md` | File: the backlog file. |
 | `base-branch` | repository default | Branch the PRs target. |
 | `merge-method` | `squash` | `squash`, `merge` or `rebase`. |
+| `model-light` | `haiku` | Model for `light` batches and for research. |
+| `model-standard` | `sonnet` | Model for `standard` batches. |
+| `model-complex` | `opus` | Model for `complex` batches. |
+| `agent-light`, `agent-standard`, `agent-complex` | none | A subagent that implements items of that tier instead of `general-purpose`. |
+| `batch-commits` | `per-item` | `per-item` or `squashed`: one commit per item in the PR, or one per batch. |
+
+A model is `haiku`, `sonnet`, `opus`, `fable`, or `inherit` (the
+orchestrator's model). The tier of each batch and item is chosen at planning
+time; see [batching.md](batching.md#model-tier).
+
+The Agent tool cannot set reasoning effort per call. To control it, define a
+project agent in `.claude/agents/<name>.md` with `model` and `effort` in its
+frontmatter, and name it in `agent-<tier>`. The worker is then spawned as that
+agent and the agent file decides model, effort and tools; `model-<tier>` is
+not used for it. Preflight warns when the file is in neither
+`.claude/agents/` nor `~/.claude/agents/`. Without an agent, workers use the
+effort of the session that runs the loop.
+
+With `batch-commits: squashed` the batch branch holds one commit that carries
+every item's trailer. A single item can then not be dropped from a red PR: a
+worker fixes the batch, or its items are blocked when the attempts run out.
+With the default squash merge, both settings land as one commit on the base
+branch.
 
 Limits, all optional:
 
@@ -74,7 +97,7 @@ Limits, all optional:
 | `ci-reruns` (per batch) | 1 |
 | `ci-wait-minutes` (per attempt) | 45 |
 | `research-passes` (per question) | 1 |
-| `parallel-batches` | 2 |
+| `parallel-items` (workers at once) | 5 |
 | `stall-threshold` (unchanged gate checks) | 2 |
 | `max-iterations` | 100 |
 | `max-hours` | 12 |

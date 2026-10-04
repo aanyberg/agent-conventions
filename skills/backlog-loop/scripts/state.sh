@@ -7,7 +7,8 @@
 #   state.sh plan-apply <plan.json>
 #   state.sh record <event> [args]      (see the record_* functions)
 #   state.sh pr-title <batch> | pr-body <batch> | branch <batch>
-#   state.sh worker-prompt <batch> [--mode implement|fix|conflict|drop] [--item ID]
+#   state.sh worker-prompt <batch> [--mode item|apply|fix|conflict|drop] [--item ID]
+#   state.sh integrate <batch>
 #   state.sh research-prompt <item>
 #   state.sh cleanup <batch> | reconcile | sync-backlog | archive | unlock
 set -u
@@ -17,7 +18,7 @@ BL_SELF=state
 bl_paths || bl_die "not inside a git repository"
 
 # jq helpers shared by every state transition.
-JQ_DEFS='
+JQ_DEFS="$BL_JQ_MODEL"'
 def has_id($ids; $i): any($ids[]; . == $i);
 def live: .status == "todo" or .status == "in-progress";
 def batch_items($b): [.items[] | select(.batch == $b and live)];
@@ -25,7 +26,7 @@ def set_batch($b; f): .batches |= map(if .id == $b then f else . end);
 def set_items($b; f): .items |= map(if .batch == $b and live then f else . end);
 def set_item($i; f): .items |= map(if .id == $i then f else . end);
 def new_batch($id; $theme; $items; $deps; $order): {
-  id: $id, kind: "items", theme: $theme, title: null, rationale: null,
+  id: $id, kind: "items", theme: $theme, title: null, rationale: null, tier: "standard",
   items: $items, order: $order, depends_on: $deps,
   status: "todo", phase: null, tries: 1, branch: null, old_branches: [], pushed: false,
   pr: null, revert_pr: null, head_sha: null, premerge_sha: null, merge_commit: null,
@@ -47,7 +48,34 @@ def fail_batch($b; $msg; $max; $drop; $next):
       | if .kind == "status"
         then (if .failures >= $max then .status = "blocked" | .phase = null else .phase = $next end)
         else .phase = (if $left == 0 then "blocking" else $next end) end);
+# The batch that runs now: the first in order that is not finished.
+def current_batch: [.batches | sort_by(.order)[] | select(.status == "todo" or .status == "in-progress" or .status == "pr-ready")] | first;
+# Move an item to the next batch, or block it when $count uses up its last
+# attempt. It keeps its effective tier, and the move is recorded for the report.
+def defer_item($i; $why; $count; $max):
+  . as $s
+  | (.items[] | select(.id == $i)) as $it
+  | ($s.batches[] | select(.id == $it.batch)) as $fb
+  | ($it | item_tier($s)) as $tier
+  | (if $count then $it.attempts + 1 else $it.attempts end) as $att
+  | if $att >= $max then
+      set_item($i; .attempts = $att | .last_error = $why | .phase = null | .worker_started_at = null | .pending = "block")
+    else
+      ([.batches | sort_by(.order)[] | select(.kind == "items" and .status == "todo" and .order > $fb.order)] | first) as $nb
+      | (if $nb then $nb.id else ([.batches[].id] | max + 1) end) as $to
+      | (if $nb then . else .batches += [new_batch($to; "Deferred items"; []; []; ([.batches[].order] | max + 1)) | .tier = $fb.tier] end)
+      | set_batch($fb.id; .items -= [$i] | .removed += [$i])
+      | set_batch($to; .items += [$i])
+      | set_item($i; .batch = $to | .status = "todo" | .phase = null | .branch = null | .worker_started_at = null
+          | .attempts = $att | .last_error = $why | .tier = $tier | .moves += [{from: $fb.id, to: $to, why: $why}])
+    end;
 '
+
+# Plan items are an id or {"id", "tier", "needs"}; this gives the object form.
+JQ_PLAN='
+def plan_items: [(.items // [])[] | if type == "object"
+  then {id: (.id | tostring), tier: (.tier // null), needs: [(.needs // [])[] | tostring]}
+  else {id: tostring, tier: null, needs: []} end][];'
 
 need_state() { bl_state_ok || bl_die "no usable state at $BL_STATE; run preflight.sh first"; }
 
@@ -73,6 +101,9 @@ require_phase() {
 }
 
 max_attempts() { bl_limit max_attempts; }
+
+# With batch-commits: squashed the items share one commit and cannot be dropped one by one.
+can_drop() { if [ "$(bl_cfg batch_commits)" = "squashed" ]; then echo false; else echo true; fi; }
 
 # --- backlog source ----------------------------------------------------------
 
@@ -125,7 +156,7 @@ cmd_init() {
   jq -n --slurpfile cfg "$BL_CONFIG" --argjson items "$items" --arg run "$run_id" \
     --arg session "$session" --argjson now "$(bl_now)" --arg iso "$(bl_iso)" \
     --argjson plan_only "$plan_only" --argjson no_merge "$no_merge" '
-    { version: 1,
+    { version: 2,
       run: { id: $run, status: "running", session: $session,
              flags: { plan_only: $plan_only, no_merge: $no_merge },
              started_at: $now, started_iso: $iso, segment_started_at: $now,
@@ -139,7 +170,8 @@ cmd_init() {
           research: "none", research_passes: 0, question: null,
           decision: null, confidence: null, needs_review: false,
           blocked_reason: (if .preblocked then {tried: null, why: "already marked blocked before this run", needs: null} else null end),
-          preblocked: .preblocked } ],
+          preblocked: .preblocked,
+          tier: null, needs: [], phase: null, branch: null, worker_started_at: null, tries: 0, moves: [] } ],
       batches: [] }' >"$tmp" || { rm -f "$tmp"; bl_lock_release; bl_die "could not build state"; }
   mv -f "$tmp" "$BL_STATE"
   bl_log "init run=$run_id session=$session items=$(bl_get '.items | length') plan_only=$plan_only no_merge=$no_merge"
@@ -214,17 +246,25 @@ cmd_plan_apply() {
   [ "$(bl_get '[.batches[] | select(.status != "todo")] | length')" = "0" ] ||
     bl_die "batches are already in flight; the plan can no longer be replaced"
   max="$(bl_limit max_batch_items)"
-  errors="$(jq -r --slurpfile plan "$file" --argjson max "${max:-15}" "$JQ_DEFS"'
+  errors="$(jq -r --slurpfile plan "$file" --argjson max "${max:-15}" "$JQ_DEFS$JQ_PLAN"'
     $plan[0] as $p
     | [.items[] | select(.status == "todo") | .id] as $todo
-    | [$p.batches[] | (.items // [])[] | tostring] as $all
+    | [$p.batches[] | plan_items | .id] as $all
+    | ([$p.batches | to_entries[] | (.key + 1) as $n | .value | plan_items | {key: .id, value: $n}] | from_entries) as $where
     | [ (if ($p.batches | length) == 0 then "the plan has no batches" else empty end),
         ($p.batches | to_entries[]
           | (.key + 1) as $n | .value
           | (if ((.items // []) | length) == 0 then "batch \($n) has no items" else empty end),
             (if (.theme // "") == "" then "batch \($n) has no theme" else empty end),
             (if ((.items // []) | length) > $max then "batch \($n) has more than \($max) items" else empty end),
-            ((.depends_on // [])[] | select(. >= $n or . < 1) | "batch \($n) may only depend on earlier batches, not \(.)")),
+            ((.tier // "standard") | select(IN("light", "standard", "complex") | not)
+              | "batch \($n) has tier '\''\(.)'\''; use light, standard or complex"),
+            (if has("depends_on") then "batch \($n) uses depends_on; put needs on its items instead" else empty end),
+            (plan_items | . as $it
+              | ((.tier // "standard") | select(IN("light", "standard", "complex") | not)
+                  | "item \($it.id) has tier '\''\(.)'\''; use light, standard or complex"),
+                (.needs[] | select(($where[.] // 0) >= $n or ($where[.] // 0) == 0)
+                  | "item \($it.id) needs \(.), which is not in an earlier batch"))),
         ($todo[] | . as $i | ($all | map(select(. == $i)) | length) as $c
           | select($c != 1) | "item \($i) is in \($c) batches, expected exactly 1"),
         ($all[] | . as $i | select(has_id($todo; $i) | not) | "item \($i) is not an open backlog item"),
@@ -234,11 +274,13 @@ cmd_plan_apply() {
     printf 'Plan rejected:\n%s\n' "$errors" >&2
     exit 1
   fi
-  upd --slurpfile plan "$file" "$JQ_DEFS"'
+  upd --slurpfile plan "$file" "$JQ_DEFS$JQ_PLAN"'
     $plan[0] as $p
     | .batches = [ $p.batches | to_entries[] | (.key + 1) as $n | .value as $v
-        | new_batch($n; $v.theme; [$v.items[] | tostring]; ($v.depends_on // []); $n)
-        | .title = ($v.title // null) | .rationale = ($v.rationale // null) ]
+        | new_batch($n; $v.theme; [$v | plan_items | .id]; []; $n)
+        | .title = ($v.title // null) | .rationale = ($v.rationale // null) | .tier = ($v.tier // "standard") ]
+    | reduce ($p.batches[] | plan_items) as $pi (.;
+        set_item($pi.id; .tier = $pi.tier | .needs = $pi.needs))
     | reduce .batches[] as $b (.;
         .items |= map(. as $it | if has_id($b.items; $it.id) then .batch = $b.id else . end))
     | reduce ($p.unclear // [])[] as $u (.;
@@ -250,7 +292,7 @@ cmd_plan_apply() {
 }
 
 write_plan_md() {
-  jq -r --arg src "$(bl_cfg source)" '
+  jq -r --arg src "$(bl_cfg source)" "$JQ_DEFS"'
     def ref($i): (if $src == "github" then "#" else "" end) + $i;
     . as $s
     | "# Backlog loop plan",
@@ -260,11 +302,12 @@ write_plan_md() {
       ((.batches | sort_by(.order)[]) as $b
         | "## Batch \($b.id): \($b.theme)",
           "",
-          (if ($b.depends_on | length) > 0 then "Depends on: " + ($b.depends_on | map("batch \(.)") | join(", ")) else "Depends on: nothing" end),
+          ($b | batch_tier as $t | "Model: \(tier_label($s.config; $t)) (\($t) tier)"),
           (if $b.rationale then "", $b.rationale else empty end),
           "",
           ($b.items[] as $i | ($s.items[] | select(.id == $i)) as $it
-            | "- \(ref($i)) \($it.title)" + (if $it.research == "pending" then " (unclear: \($it.question))" else "" end)),
+            | "- \(ref($i)) \($it.title) (\([tier_label($s.config; $it | item_tier($s))] + [$it.needs[] | "needs \(ref(.))"] | join(", ")))"
+              + (if $it.research == "pending" then " (unclear: \($it.question))" else "" end)),
           "")' "$BL_STATE" >"$BL_DIR/plan.md"
 }
 
@@ -337,7 +380,7 @@ section() {
 # The BL_T_* variables are read by render() through indirect expansion.
 # shellcheck disable=SC2034
 cmd_worker_prompt() {
-  local b="$1" mode="implement" item="" tmpl out done_ids
+  local b="$1" mode="item" item="" tmpl out
   shift
   need_state
   require_batch "$b"
@@ -348,7 +391,9 @@ cmd_worker_prompt() {
       *) shift ;;
     esac
   done
-  if [ "$mode" = "implement" ] && [ "$(bq "$b" '.pushed')" = "true" ]; then mode="continue"; fi
+  case "$mode" in
+    item | apply | drop) [ -n "$item" ] || bl_die "worker-prompt --mode $mode needs --item <id>" ;;
+  esac
   BL_T_BATCH="$b"
   BL_T_THEME="$(bq "$b" '.theme')"
   BL_T_BRANCH="$(bq "$b" '.branch')"
@@ -356,16 +401,16 @@ cmd_worker_prompt() {
   BL_T_PR="$(bq "$b" '.pr // "none"')"
   BL_T_ERROR="$(bq "$b" '.last_error // "none"')"
   BL_T_ITEM="$item"
+  BL_T_ITEM_BRANCH="$([ -z "$item" ] || iq "$item" '.branch // empty')"
   BL_T_BACKLOG_FILE="$(bl_cfg path)"
-  done_ids="[]"
-  if [ "$mode" = "continue" ]; then done_ids="$(trailer_ids "$b" Backlog-Item | ids_json)"; fi
-  BL_T_ITEMS="$(jq -r --argjson b "$b" --arg src "$(bl_cfg source)" --argjson committed "$done_ids" "$JQ_DEFS"'
-    batch_items($b)[] | select(.pending == null and .research != "pending" and (has_id($committed; .id) | not))
+  BL_T_ITEMS="$(jq -r --argjson b "$b" --arg src "$(bl_cfg source)" --arg one "$([ "$mode" = item ] && printf '%s' "$item")" "$JQ_DEFS"'
+    batch_items($b)[] | select(.pending == null and .research != "pending" and ($one == "" or .id == $one))
     | "- id \(.id): \(.title)"
       + (if $src == "github" then " (read it with: gh issue view \(.id))" else "" end)
       + (if .decision then " [decision record below]" else "" end)
       + (if .last_error then " [previous attempt failed: \(.last_error)]" else "" end)' "$BL_STATE")"
-  BL_T_DECISIONS="$(jq -r --argjson b "$b" "$JQ_DEFS"'batch_items($b)[] | select(.decision != null) | "\(.id)\t\(.decision)"' "$BL_STATE" |
+  BL_T_DECISIONS="$(jq -r --argjson b "$b" --arg one "$([ "$mode" = item ] && printf '%s' "$item")" "$JQ_DEFS"'
+    batch_items($b)[] | select(.decision != null and ($one == "" or .id == $one)) | "\(.id)\t\(.decision)"' "$BL_STATE" |
     while IFS="$(printf '\t')" read -r id path; do
       printf '### Decision for item %s\n\n' "$id"
       if [ -f "$BL_DIR/$path" ]; then cat "$BL_DIR/$path"; fi
@@ -380,7 +425,7 @@ cmd_worker_prompt() {
     section "$BL_SKILL_DIR/reference/implementer.md" "report"
   } >"$tmpl"
   [ -s "$tmpl" ] || { rm -f "$tmpl"; bl_die "unknown worker mode: $mode"; }
-  out="$BL_DIR/prompts/b$b-$mode.md"
+  out="$BL_DIR/prompts/b$b-$mode${item:+-$item}.md"
   render "$tmpl" >"$out"
   rm -f "$tmpl"
   cat "$out"
@@ -468,14 +513,15 @@ mirror_merged() {
 
 # Remove worktrees and local branches left over from earlier workers of a batch.
 cmd_cleanup() {
-  local b="$1" prefix wt="" branch old
+  local b="$1" prefix items wt="" branch old
   need_state
   require_batch "$b"
   prefix="refs/heads/backlog-loop/$(bl_get '.run.id')/b$b-"
+  items="refs/heads/backlog-loop/$(bl_get '.run.id')/b$b/"
   git -C "$BL_ROOT" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
     case "$line" in
       "worktree "*) wt="${line#worktree }" ;;
-      "branch $prefix"*)
+      "branch $prefix"* | "branch $items"*)
         if [ "$wt" != "$BL_ROOT" ]; then
           git -C "$BL_ROOT" worktree unlock "$wt" >/dev/null 2>&1 || true
           git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || bl_log "cleanup: could not remove worktree $wt"
@@ -484,7 +530,7 @@ cmd_cleanup() {
     esac
   done
   git -C "$BL_ROOT" worktree prune >/dev/null 2>&1 || true
-  git -C "$BL_ROOT" for-each-ref --format='%(refname:short)' "$prefix*" 2>/dev/null | while IFS= read -r branch; do
+  git -C "$BL_ROOT" for-each-ref --format='%(refname:short)' "$prefix*" "$items" 2>/dev/null | while IFS= read -r branch; do
     git -C "$BL_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
   done
   bq "$b" '.old_branches[]?' | while IFS= read -r old; do
@@ -506,7 +552,7 @@ requeue_batch() {
         set_items($b; .pending = "block" | .last_error = "merge conflict persists after re-queueing the batch")
         | set_batch($b; .phase = "blocking" | .last_error = "merge conflict persists after re-queue")
       else
-        set_items($b; .status = "todo")
+        set_items($b; .status = "todo" | .phase = null | .branch = null | .worker_started_at = null)
         | set_batch($b; .status = "todo" | .phase = null | .requeues += 1 | .tries += 1
             | .old_branches += [.branch] | .branch = null | .pr = null | .pushed = false
             | .head_sha = null | .premerge_sha = null | .conflict_attempts = 0 | .order = $last)
@@ -531,75 +577,218 @@ settle_batch() {
 
 # --- record: state transitions ----------------------------------------------
 
-record_worker_started() {
-  local b="$1" status
-  require_batch "$b"
+require_item() {
+  [ -n "$(iq "$1" '.id' 2>/dev/null)" ] || bl_die "unknown item: $1"
+}
+
+require_item_phase() {
+  local i="$1" have
+  have="$(iq "$i" '.phase // "none"')"
+  [ "$have" = "$2" ] || bl_die "item $i is in phase '$have', expected: $2. Run next.sh for the current action."
+}
+
+# Move an item on (or block it) and close its old batch if nothing is left.
+defer() {
+  # defer <item> <reason> <count: true|false>
+  local i="$1" b
+  b="$(iq "$i" '.batch')"
+  upd --arg i "$i" --arg why "$2" --argjson count "$3" --argjson max "$(max_attempts)" "$JQ_DEFS"'
+    defer_item($i; $why; $count; $max)'
+  settle_batch "$b"
+  bl_log "defer item=$i from batch=$b to batch=$(iq "$i" '.batch') pending=$(iq "$i" '.pending') reason=$2"
+}
+
+# An item worker that came back without a usable commit. Items that turned out
+# unclear or hard-blocked wait for that instead, without an attempt.
+item_unusable() {
+  local i="$1" why="$2"
+  if [ "$(iq "$i" '.research')" = "pending" ] || [ "$(iq "$i" '.pending')" != "null" ]; then
+    upd --arg i "$i" "$JQ_DEFS"'set_item($i; .phase = null | .worker_started_at = null)'
+    bl_log "item $i waits for research or blocking: $why"
+  else
+    defer "$i" "$why" true
+  fi
+}
+
+record_item_started() {
+  local i="$1" b status
+  require_item "$i"
+  case "$(iq "$i" '.status')" in todo | in-progress) ;; *) bl_die "item $i is $(iq "$i" '.status')" ;; esac
+  [ "$(iq "$i" '.phase')" = "null" ] || bl_die "item $i is already $(iq "$i" '.phase')"
+  [ "$(iq "$i" '.pending')" = "null" ] || bl_die "item $i waits to be $(iq "$i" '.pending')ed"
+  [ "$(iq "$i" '.research')" != "pending" ] || bl_die "item $i waits for research"
+  b="$(iq "$i" '.batch')"
   status="$(bq "$b" '.status')"
-  if [ "$status" = "in-progress" ]; then require_phase "$b" implement; else
+  if [ "$status" = "in-progress" ]; then require_phase "$b" working; else
     [ "$status" = "todo" ] || bl_die "batch $b is $status and cannot be started"
   fi
-  cmd_cleanup "$b"
-  upd --argjson b "$b" --argjson now "$(bl_now)" --arg run "$(bl_get '.run.id')" "$JQ_DEFS"'
-    set_batch($b; .status = "in-progress" | .phase = "working" | .worker_started_at = $now
-      | .branch = (.branch // "backlog-loop/\($run)/b\(.id)-t\(.tries)"))
-    | set_items($b; .status = "in-progress")'
-  bl_log "worker-started batch=$b branch=$(bq "$b" '.branch')"
-  bq "$b" '.branch'
+  upd --arg i "$i" --argjson b "$b" --argjson now "$(bl_now)" --arg run "$(bl_get '.run.id')" "$JQ_DEFS"'
+    set_batch($b; .status = "in-progress" | .phase = "working")
+    | set_item($i; .status = "in-progress" | .phase = "working" | .worker_started_at = $now | .tries += 1
+        | .branch = "backlog-loop/\($run)/b\($b)/i\(.id)-t\(.tries)")'
+  bl_log "item-started item=$i batch=$b branch=$(iq "$i" '.branch')"
+  iq "$i" '.branch'
 }
 
-record_worker_done() {
-  local b="$1" branch sha done_ids
-  require_batch "$b"
-  require_phase "$b" working
-  branch="$(bq "$b" '.branch')"
-  fetch_ref "$branch" "$(bl_cfg base_branch)"
-  sha="$(remote_sha "$branch")"
-  if [ -z "$sha" ]; then
-    record_worker_failed "$b" --reason "the worker did not push branch $branch"
-    return 0
+# The item branch is local: worktrees share the repository's refs.
+record_item_done() {
+  local i="$1" branch base n
+  require_item "$i"
+  require_item_phase "$i" working
+  branch="$(iq "$i" '.branch')"
+  base="$(bl_cfg base_branch)"
+  fetch_ref "$base"
+  if ! git -C "$BL_ROOT" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1; then
+    item_unusable "$i" "no commit: the worker left no branch $branch"
+  else
+    n="$(git -C "$BL_ROOT" rev-list --count "origin/$base..refs/heads/$branch" 2>/dev/null || echo 0)"
+    if [ "$n" != "1" ]; then
+      item_unusable "$i" "no commit: expected one commit on $branch, found $n"
+    elif ! git -C "$BL_ROOT" log -1 --format=%B "refs/heads/$branch" | grep -qxE "Backlog-Item:[[:space:]]*${i}[[:space:]]*"; then
+      item_unusable "$i" "no commit with trailer Backlog-Item: $i on $branch"
+    else
+      upd --arg i "$i" "$JQ_DEFS"'set_item($i; .phase = "done" | .worker_started_at = null)'
+      bl_log "item-done item=$i branch=$branch"
+    fi
   fi
-  done_ids="$(trailer_ids "$b" Backlog-Item | ids_json)"
-  upd --argjson b "$b" --argjson committed "$done_ids" --arg sha "$sha" \
-    --argjson max "$(max_attempts)" "$JQ_DEFS"'
-    set_items($b;
-      if .pending != null or .research == "pending" or has_id($committed; .id) then .
-      else .attempts += 1 | .last_error = "no commit with trailer Backlog-Item: \(.id) on the branch"
-        | (if .attempts >= $max then .pending = "block" else . end)
-      end)
-    | (batch_items($b)) as $act
-    | ([$act[] | select(.pending == null and (has_id($committed; .id) | not))] | length) as $open
-    | ([$act[] | select(.pending == null and has_id($committed; .id))] | length) as $ready
-    | set_batch($b; .pushed = true | .head_sha = $sha | .worker_started_at = null
-        | .phase = (if $open == 0 and $ready > 0 then "open-pr"
-                    elif $open == 0 and $ready == 0 then "blocking"
-                    else "implement" end))'
-  bl_log "worker-done batch=$b sha=$sha phase=$(bq "$b" '.phase') committed=$(printf '%s' "$done_ids" | jq -c .)"
-  printf 'Batch %s: phase %s.\n' "$b" "$(bq "$b" '.phase')"
+  printf 'Item %s: %s, batch %s.\n' "$i" "$(iq "$i" '.phase // .pending // "moved"')" "$(iq "$i" '.batch')"
 }
 
-record_worker_failed() {
-  local b="$1" reason="worker failed" done_ids
+record_item_failed() {
+  local i="$1" reason="worker failed"
   shift
   while [ $# -gt 0 ]; do
     case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac
   done
+  require_item "$i"
+  require_item_phase "$i" working
+  item_unusable "$i" "$reason"
+  printf 'Item %s: worker failure recorded, batch %s.\n' "$i" "$(iq "$i" '.batch')"
+}
+
+# Remove worktrees of earlier workers that still have <branch> checked out.
+release_branch() {
+  local wt=""
+  git -C "$BL_ROOT" worktree list --porcelain 2>/dev/null | while IFS= read -r line; do
+    case "$line" in
+      "worktree "*) wt="${line#worktree }" ;;
+      "branch refs/heads/$1")
+        if [ "$wt" != "$BL_ROOT" ]; then
+          git -C "$BL_ROOT" worktree unlock "$wt" >/dev/null 2>&1 || true
+          git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || bl_log "could not remove worktree $wt"
+        fi
+        ;;
+    esac
+  done
+  git -C "$BL_ROOT" worktree prune >/dev/null 2>&1 || true
+}
+
+# squash_worktree <worktree> <batch>: fold the batch's commits into one that
+# carries every Backlog-Item trailer (batch-commits: squashed).
+squash_worktree() {
+  local wt="$1" b="$2" base fork ids msg
+  base="$(bl_cfg base_branch)"
+  fork="$(git -C "$wt" merge-base "origin/$base" HEAD)" || return 1
+  [ "$(git -C "$wt" rev-list --count "$fork..HEAD")" -gt 1 ] || return 0
+  ids="$(git -C "$wt" log --reverse --format=%B "$fork..HEAD" | sed -n 's/^Backlog-Item:[[:space:]]*//p' | sed 's/[[:space:]]*$//' | awk '!seen[$0]++')"
+  msg="$BL_DIR/squash-msg.txt"
+  { cmd_pr_title "$b"; printf '\n'; printf '%s\n' "$ids" | sed 's/^/Backlog-Item: /'; } >"$msg"
+  git -C "$wt" reset -q --soft "$fork" && git -C "$wt" commit -q -F "$msg"
+  rm -f "$msg"
+}
+
+# Build the batch branch from the base: one cherry-pick per finished item, in
+# plan order. A pick that conflicts is aborted and left to an apply worker.
+cmd_integrate() {
+  local b="$1" base branch wt id ib applied="" conflicts=""
+  need_state
   require_batch "$b"
   require_phase "$b" working
-  fetch_ref "$(bq "$b" '.branch')"
-  done_ids="$(trailer_ids "$b" Backlog-Item | ids_json)"
-  upd --argjson b "$b" --argjson committed "$done_ids" --arg msg "$reason" \
-    --argjson max "$(max_attempts)" "$JQ_DEFS"'
-    set_items($b;
-      if .pending != null or .research == "pending" or has_id($committed; .id) then .
-      else .attempts += 1 | .last_error = $msg
-        | (if .attempts >= $max then .pending = "block" else . end)
-      end)
-    | ([batch_items($b)[] | select(.pending == null)] | length) as $left
-    | set_batch($b; .worker_started_at = null | .last_error = $msg
-        | .pushed = (.pushed or ($committed | length) > 0)
-        | .phase = (if $left == 0 then "blocking" else "implement" end))'
-  bl_log "worker-failed batch=$b reason=$reason"
-  printf 'Batch %s: worker failure recorded, phase %s.\n' "$b" "$(bq "$b" '.phase')"
+  [ "$(jq -r --argjson b "$b" "$JQ_DEFS"'batch_items($b) | length > 0 and all(.[]; .pending == null and .phase == "done")' "$BL_STATE")" = "true" ] ||
+    bl_die "items of batch $b are still being worked on"
+  base="$(bl_cfg base_branch)"
+  branch="backlog-loop/$(bl_get '.run.id')/b$b-t$(bq "$b" '.tries')"
+  wt="$BL_DIR/integrate-worktree"
+  fetch_ref "$base"
+  git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  release_branch "$branch"
+  git -C "$BL_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
+  git -C "$BL_ROOT" worktree add -q -b "$branch" "$wt" "origin/$base" >/dev/null 2>&1 ||
+    bl_die "could not create a worktree for $branch"
+  for id in $(jq -r --argjson b "$b" "$JQ_DEFS"'(.batches[] | select(.id == $b) | .items) as $order
+      | $order[] as $i | batch_items($b)[] | select(.id == $i) | .id' "$BL_STATE"); do
+    ib="$(iq "$id" '.branch')"
+    if git -C "$wt" cherry-pick --keep-redundant-commits "refs/heads/$ib" >/dev/null 2>&1; then
+      applied="$applied $id"
+    else
+      git -C "$wt" cherry-pick --abort >/dev/null 2>&1 || git -C "$wt" reset -q --hard HEAD
+      conflicts="$conflicts $id"
+    fi
+  done
+  if [ "$(bl_cfg batch_commits)" = "squashed" ]; then squash_worktree "$wt" "$b" || bl_log "integrate: squash failed for batch $b"; fi
+  git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+  upd --argjson b "$b" --arg branch "$branch" --argjson applied "$(printf '%s' "$applied" | tr ' ' '\n' | ids_json)" \
+    --argjson conflicts "$(printf '%s' "$conflicts" | tr ' ' '\n' | ids_json)" "$JQ_DEFS"'
+    set_items($b; if has_id($applied; .id) then .phase = "applied" elif has_id($conflicts; .id) then .phase = "conflict" else . end)
+    | set_batch($b; .branch = $branch | .pushed = false
+        | .phase = (if ($conflicts | length) > 0 then "apply" else "open-pr" end))'
+  bl_log "integrate batch=$b branch=$branch applied=[$applied ] conflicts=[$conflicts ]"
+  printf 'Batch %s: %s applied, %s conflicting, phase %s.\n' "$b" "$(printf '%s' "$applied" | wc -w | tr -d ' ')" \
+    "$(printf '%s' "$conflicts" | wc -w | tr -d ' ')" "$(bq "$b" '.phase')"
+}
+
+record_apply_started() {
+  local i="$1" b
+  require_item "$i"
+  require_item_phase "$i" conflict
+  b="$(iq "$i" '.batch')"
+  require_phase "$b" apply
+  release_branch "$(bq "$b" '.branch')"
+  upd --arg i "$i" --argjson now "$(bl_now)" "$JQ_DEFS"'set_item($i; .phase = "applying" | .worker_started_at = $now)'
+  bl_log "apply-started item=$i batch=$b"
+  bq "$b" '.branch'
+}
+
+# After an apply: open the PR once no item waits, close the batch if none is on it.
+apply_settle() {
+  local b="$1"
+  upd --argjson b "$b" "$JQ_DEFS"'
+    batch_items($b) as $act
+    | if any($act[]; .phase == "conflict" or .phase == "applying") then .
+      elif any($act[]; .phase == "applied") then set_batch($b; .phase = "open-pr")
+      else . end'
+  settle_batch "$b"
+}
+
+record_apply_done() {
+  local i="$1" b branch base
+  require_item "$i"
+  require_item_phase "$i" applying
+  b="$(iq "$i" '.batch')"
+  branch="$(bq "$b" '.branch')"
+  base="$(bl_cfg base_branch)"
+  if git -C "$BL_ROOT" log --format=%B "origin/$base..refs/heads/$branch" 2>/dev/null | grep -qxE "Backlog-Item:[[:space:]]*${i}[[:space:]]*"; then
+    upd --arg i "$i" "$JQ_DEFS"'set_item($i; .phase = "applied" | .worker_started_at = null)'
+    bl_log "apply-done item=$i batch=$b"
+  else
+    defer "$i" "could not apply onto the batch branch: no commit with trailer Backlog-Item: $i on $branch" true
+  fi
+  apply_settle "$b"
+  printf 'Item %s: %s. Batch %s: phase %s.\n' "$i" "$(iq "$i" '.phase // "moved on"')" "$b" "$(bq "$b" '.phase // .status')"
+}
+
+record_apply_failed() {
+  local i="$1" reason="apply failed" b
+  shift
+  while [ $# -gt 0 ]; do
+    case "$1" in --reason) reason="$2"; shift 2 ;; *) shift ;; esac
+  done
+  require_item "$i"
+  require_item_phase "$i" applying
+  b="$(iq "$i" '.batch')"
+  defer "$i" "could not apply onto the batch branch: $reason" true
+  apply_settle "$b"
+  printf 'Item %s moved on. Batch %s: phase %s.\n' "$i" "$b" "$(bq "$b" '.phase // .status')"
 }
 
 record_unclear() {
@@ -698,12 +887,12 @@ record_ci() {
         upd --argjson b "$b" --arg d "$detail" "$JQ_DEFS"'set_batch($b; .phase = "ci-rerun" | .last_error = "CI red: \($d)")'
       else
         upd --argjson b "$b" --arg msg "CI red: $detail" --argjson max "$(max_attempts)" \
-          "$JQ_DEFS"'fail_batch($b; $msg; $max; true; "fix")'
+          --argjson drop "$(can_drop)" "$JQ_DEFS"'fail_batch($b; $msg; $max; $drop; "fix")'
       fi
       ;;
     timeout)
       upd --argjson b "$b" --arg msg "CI timeout: checks did not finish within $(bl_limit ci_wait_minutes) minutes" \
-        --argjson max "$(max_attempts)" "$JQ_DEFS"'fail_batch($b; $msg; $max; true; "fix")'
+        --argjson max "$(max_attempts)" --argjson drop "$(can_drop)" "$JQ_DEFS"'fail_batch($b; $msg; $max; $drop; "fix")'
       ;;
     *) bl_die "unknown CI result: $result" ;;
   esac
@@ -757,6 +946,7 @@ record_poison() {
   require_batch "$b"
   require_phase "$b" fix ci ci-rerun merge rebase conflict
   [ "$(iq "$i" '.batch')" = "$b" ] || bl_die "item $i is not in batch $b"
+  [ "$(can_drop)" = "true" ] || bl_die "batch-commits is squashed: item $i cannot be dropped on its own; fix the batch instead"
   upd --argjson b "$b" --arg i "$i" --arg r "$reason" "$JQ_DEFS"'
     (.batches[] | select(.id == $b) | .failures) as $f
     | set_items($b; if .id == $i then .pending = "drop" | .last_error = $r
@@ -780,14 +970,14 @@ record_item_dropped() {
     ([.batches[].id] | max + 1) as $nid
     | ([.batches[].order] | max + 1) as $last
     | (.items[] | select(.id == $i)) as $it
+    | (.batches[] | select(.id == $b) | .tier // "standard") as $tier
     | set_batch($b; .items -= [$i] | .removed += [$i] | .head_sha = $sha
         | if .pr != null then .phase = "ci" | .ci_started_at = $now | .ci_polls = 0 else . end)
     | if $it.attempts >= $max then
         set_item($i; .batch = null | .pending = "block")
       else
-        set_item($i; .batch = $nid | .pending = null | .status = "todo")
-        | .batches += [new_batch($nid; "Retry of \($i): \($it.title)"; [$i]; []; $last) | .retry_of = $b]
-        | .batches |= map(if (.depends_on | index($b)) != null and .id != $nid then .depends_on += [$nid] else . end)
+        set_item($i; .batch = $nid | .pending = null | .status = "todo" | .phase = null | .branch = null)
+        | .batches += [new_batch($nid; "Retry of \($i): \($it.title)"; [$i]; []; $last) | .retry_of = $b | .tier = $tier]
       end'
   settle_batch "$b"
   bl_log "item-dropped item=$i from batch=$b"
@@ -1046,9 +1236,12 @@ cmd_record() {
   [ $# -gt 0 ] || bl_die "state.sh record $event: missing id"
   bl_lock_touch
   case "$event" in
-    worker-started) record_worker_started "$@" ;;
-    worker-done) record_worker_done "$@" ;;
-    worker-failed) record_worker_failed "$@" ;;
+    item-started) record_item_started "$@" ;;
+    item-done) record_item_done "$@" ;;
+    item-failed) record_item_failed "$@" ;;
+    apply-started) record_apply_started "$@" ;;
+    apply-done) record_apply_done "$@" ;;
+    apply-failed) record_apply_failed "$@" ;;
     unclear) record_unclear "$@" ;;
     decision) record_decision "$@" ;;
     hard-blocker) record_hard_blocker "$@" ;;
@@ -1089,10 +1282,6 @@ cmd_reconcile() {
     phase="$(bq "$b" '.phase // "none"')"
     status="$(bq "$b" '.status')"
     if [ -z "$pr" ]; then
-      if [ "$phase" = "working" ]; then
-        upd --argjson b "$b" "$JQ_DEFS"'set_batch($b; .phase = "implement" | .worker_started_at = null)'
-        bl_log "reconcile batch=$b: worker lost, back to implement"
-      fi
       continue
     fi
     st="$(bl_pr_field "$pr" state)"
@@ -1107,7 +1296,7 @@ cmd_reconcile() {
           *)
             upd --argjson b "$b" "$JQ_DEFS"'
               if (.batches[] | select(.id == $b) | .kind) == "status" then set_batch($b; .status = "closed" | .phase = null)
-              else set_items($b; .status = "todo")
+              else set_items($b; .status = "todo" | .phase = null | .branch = null | .worker_started_at = null)
                 | set_batch($b; .status = "todo" | .phase = null | .tries += 1 | .old_branches += [.branch]
                     | .branch = null | .pr = null | .pushed = false | .head_sha = null | .premerge_sha = null)
               end'
@@ -1121,8 +1310,6 @@ cmd_reconcile() {
             upd --argjson b "$b" --argjson now "$(bl_now)" "$JQ_DEFS"'
               set_batch($b; .status = "in-progress" | .phase = "ci" | .ci_started_at = $now | .ci_polls = 0)'
           fi
-        elif [ "$phase" = "working" ]; then
-          upd --argjson b "$b" "$JQ_DEFS"'set_batch($b; .phase = "implement" | .worker_started_at = null)'
         elif [ "$phase" = "ci" ]; then
           upd --argjson b "$b" --argjson now "$(bl_now)" "$JQ_DEFS"'set_batch($b; .ci_started_at = $now | .ci_polls = 0)'
         fi
@@ -1130,9 +1317,12 @@ cmd_reconcile() {
       *) bl_log "reconcile batch=$b: could not read PR #$pr, left as is" ;;
     esac
   done
+  # Workers of the crashed session are gone: their items start or apply again.
   upd '
     ([.batches[] | select(.status == "todo") | .id]) as $todo
-    | .items |= map(if .status == "in-progress" and (.batch as $b | any($todo[]; . == $b)) then .status = "todo" else . end)'
+    | .items |= map(if .status == "in-progress" and (.batch as $b | any($todo[]; . == $b)) then .status = "todo" else . end)
+    | .items |= map(if .phase == "working" then .phase = null | .worker_started_at = null
+                    elif .phase == "applying" then .phase = "conflict" | .worker_started_at = null else . end)'
   bl_log "reconcile done"
 }
 
@@ -1189,11 +1379,28 @@ cmd_sync_backlog() {
 
 # Create the pull request of a batch, or pick up one that already exists.
 cmd_open_pr() {
-  local b="$1" branch body out
+  local b="$1" branch body out wt
   need_state
   require_batch "$b"
+  require_phase "$b" open-pr apply
+  [ "$(bq "$b" '.phase')" = "open-pr" ] || apply_settle "$b"
   require_phase "$b" open-pr
   branch="$(bq "$b" '.branch')"
+  if [ "$(bq "$b" '.pushed')" != "true" ]; then
+    git -C "$BL_ROOT" rev-parse -q --verify "refs/heads/$branch" >/dev/null 2>&1 || bl_die "batch branch $branch does not exist; run integrate first"
+    if [ "$(bl_cfg batch_commits)" = "squashed" ]; then
+      wt="$BL_DIR/integrate-worktree"
+      release_branch "$branch"
+      git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+      git -C "$BL_ROOT" worktree add -q "$wt" "$branch" >/dev/null 2>&1 || bl_die "could not check out $branch to squash it"
+      squash_worktree "$wt" "$b" || bl_log "open-pr: squash failed for batch $b"
+      git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
+    fi
+    git -C "$BL_ROOT" push -q origin "refs/heads/$branch:refs/heads/$branch" >/dev/null 2>&1 || bl_die "could not push $branch"
+    upd --argjson b "$b" --arg sha "$(git -C "$BL_ROOT" rev-parse "refs/heads/$branch")" "$JQ_DEFS"'
+      set_batch($b; .pushed = true | .head_sha = $sha)'
+    bl_log "open-pr: pushed $branch"
+  fi
   if [ -z "$(gh pr list --head "$branch" --state open --json number --jq '.[0].number // empty' 2>/dev/null)" ]; then
     body="$BL_DIR/pr-body.md"
     cmd_pr_body "$b" >"$body"
@@ -1203,26 +1410,44 @@ cmd_open_pr() {
   record_pr_opened "$b"
 }
 
-# Transitions that need no agent: worker deadlines, dependencies on blocked
-# batches, and batches that have nothing left to block.
+# Transitions that need no agent: worker deadlines, items whose needs are not
+# met, and batches that have nothing left to block.
 cmd_housekeeping() {
-  local now wait_min b
+  local now wait_min i cur line why
   need_state
   now="$(bl_now)"
   wait_min="$(bl_limit worker_wait_minutes)"
   jq -r --argjson now "$now" --argjson max "$((${wait_min:-120} * 60))" '
-    .batches[] | select(.phase == "working" and .worker_started_at != null
-      and ($now - .worker_started_at) >= $max) | .id' "$BL_STATE" | while IFS= read -r b; do
-    record_worker_failed "$b" --reason "worker exceeded the ${wait_min:-120}-minute deadline" >/dev/null
+    .items[] | select((.phase == "working" or .phase == "applying") and .worker_started_at != null
+      and ($now - .worker_started_at) >= $max) | "\(.id)\t\(.phase)"' "$BL_STATE" | while IFS="$(printf '\t')" read -r i phase; do
+    if [ "$phase" = "working" ]; then
+      record_item_failed "$i" --reason "worker exceeded the ${wait_min:-120}-minute deadline" >/dev/null
+    else
+      record_apply_failed "$i" --reason "worker exceeded the ${wait_min:-120}-minute deadline" >/dev/null
+    fi
   done
+  # Items of the batch about to run whose needed items are not merged.
+  cur="$(jq -r "$JQ_DEFS"'current_batch | select(. != null and .status != "pr-ready") | .id' "$BL_STATE")"
+  if [ -n "$cur" ]; then
+    jq -r --argjson b "$cur" "$JQ_DEFS"'. as $s | batch_items($b)[]
+      | select(.phase == null and .pending == null and (.needs | length) > 0)
+      | .id as $i
+      | ([.needs[] as $n | $s.items[] | select(.id == $n and .status == "blocked") | $n] | first) as $dead
+      | ([.needs[] as $n | $s.items[] | select(.id == $n and .status != "merged") | $n] | first) as $wait
+      | if $dead then "block\t\($i)\tneeds item \($dead), which is blocked"
+        elif $wait then "defer\t\($i)\tneeds item \($wait), which is not merged yet"
+        else empty end' "$BL_STATE" | while IFS="$(printf '\t')" read -r line i why; do
+      if [ "$line" = "block" ]; then
+        upd --arg i "$i" --arg why "$why" "$JQ_DEFS"'set_item($i; .pending = "block" | .last_error = $why)'
+      else
+        defer "$i" "$why" false
+      fi
+    done
+  fi
   upd "$JQ_DEFS"'
-    [.batches[] | select(.status == "blocked" and .retry_of == null) | .id] as $dead
-    | [.batches[] | select(.status == "todo") | select(any(.depends_on[]; . as $d | any($dead[]; . == $d))) | .id] as $stuck
-    | .items |= map(if (.batch as $b | any($stuck[]; . == $b)) and live and .pending == null
-        then .pending = "block" | .last_error = "depends on batch that is blocked" else . end)
-    | reduce (.batches[] | select(.phase == "blocking") | .id) as $b (.;
-        if (batch_items($b) | length) == 0 then set_batch($b; .status = "blocked" | .phase = null)
-        else set_items($b; if .pending == null then .pending = "block" else . end) end)'
+    reduce (.batches[] | select(.phase == "blocking") | .id) as $b (.;
+      if (batch_items($b) | length) == 0 then set_batch($b; .status = "blocked" | .phase = null)
+      else set_items($b; if .pending == null then .pending = "block" else . end) end)'
 }
 
 # Stop-gate bookkeeping: last hash, unchanged-gate counter, consecutive blocks.
@@ -1261,6 +1486,7 @@ case "$cmd" in
   reconcile) cmd_reconcile ;;
   sync-backlog) cmd_sync_backlog ;;
   open-pr) cmd_open_pr "$@" ;;
+  integrate) cmd_integrate "$@" ;;
   housekeeping) cmd_housekeeping ;;
   tick) cmd_tick ;;
   purge-logs) cmd_purge_logs ;;

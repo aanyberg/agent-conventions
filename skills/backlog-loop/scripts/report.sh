@@ -31,6 +31,7 @@ text="$(jq -r --arg dir ".planning/backlog-loop" '
         "         Reason: \(.blocked_reason.why // "unknown")",
         (if .blocked_reason.needs then "         Needs:  \(.blocked_reason.needs)" else empty end)),
     (.items[] | select(.needs_review) | "Review:  \($p)\(.id) decided with low confidence, see \(.decision)"),
+    (.items[] | .id as $i | (.moves // [])[] | "Moved:   \($p)\($i) from batch \(.from) to batch \(.to): \(.why)"),
     ([.batches | sort_by(.id)[] | select(.fixes > 0 or .ci_reruns > 0 or .requeues > 0)
         | "batch \(.id) (" + ([ (if .fixes > 0 then "\(.fixes) fix" + (if .fixes > 1 then "es" else "" end) else empty end),
                                (if .ci_reruns > 0 then "\(.ci_reruns) CI rerun" + (if .ci_reruns > 1 then "s" else "" end) else empty end),
@@ -43,7 +44,8 @@ text="$(jq -r --arg dir ".planning/backlog-loop" '
   printf 'Run %s, started %s, %s iterations. Written %s.\n\n' "$(bl_get '.run.id')" \
     "$(bl_get '.run.started_iso')" "$(bl_get '.run.total_iterations')" "$(bl_iso)"
   printf '```text\n%s\n```\n\n## Batches\n\n' "$text"
-  jq -r '.batches | sort_by(.id)[] | "- Batch \(.id) \"\(.theme)\": \(.status)"
+  jq -r "$BL_JQ_MODEL"'.config as $cfg | .batches | sort_by(.id)[]
+    | "- Batch \(.id) \"\(.theme)\" (\(tier_model($cfg; batch_tier))): \(.status)"
     + (if .pr then ", PR #\(.pr)" else "" end)
     + (if .revert_pr then ", reverted in PR #\(.revert_pr)" else "" end)
     + (if .last_error and .status != "merged" then ". Last error: \(.last_error)" else "" end)' "$BL_STATE"

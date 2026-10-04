@@ -101,6 +101,41 @@ bl_hash() {
 bl_cfg() { jq -r --arg k "$1" '.config[$k] // empty' "$BL_STATE"; }
 bl_limit() { jq -r --arg k "$1" '.config.limits[$k] // empty' "$BL_STATE"; }
 
+# Worker model per batch tier. The config may override each tier; "inherit"
+# means the worker runs on the orchestrator's model.
+# shellcheck disable=SC2034 # used by preflight.sh
+BL_TIERS="light standard complex"
+BL_JQ_MODEL='
+def tier_model($cfg; $tier): ($cfg.models[$tier] // {light: "haiku", standard: "sonnet", complex: "opus"}[$tier]);
+def tier_agent($cfg; $tier): ($cfg.agents // {})[$tier] // "";
+def tier_label($cfg; $tier): if tier_agent($cfg; $tier) != "" then "agent \(tier_agent($cfg; $tier))" else tier_model($cfg; $tier) end;
+def batch_tier: .tier // "standard";
+def tier_rank: {light: 0, standard: 1, complex: 2}[.] // 1;
+def item_tier($s): .tier // (.batch as $b | [$s.batches[] | select(.id == $b) | .tier][0]) // "standard";'
+bl_tier_model() { jq -r --arg t "$1" "$BL_JQ_MODEL"'tier_model(.config; $t)' "$BL_STATE"; }
+bl_tier_label() { jq -r --arg t "$1" "$BL_JQ_MODEL"'tier_label(.config; $t)' "$BL_STATE"; }
+bl_item_tier() { jq -r --arg i "$1" "$BL_JQ_MODEL"'. as $s | .items[] | select(.id == $i) | item_tier($s)' "$BL_STATE"; }
+# The tier for a worker acting on the whole batch: the highest among its items.
+bl_batch_tier() {
+  jq -r --argjson b "$1" "$BL_JQ_MODEL"'. as $s | (.batches[] | select(.id == $b)) as $bt
+    | [$bt.items[] as $i | $s.items[] | select(.id == $i) | item_tier($s)] + [$bt | batch_tier]
+    | max_by(tier_rank)' "$BL_STATE"
+}
+# bl_spawn <tier>: the Agent tool call for a worker of that tier. A project
+# agent decides its own model and effort, so no model is passed with it.
+bl_spawn() {
+  local agent model
+  agent="$(jq -r --arg t "$1" "$BL_JQ_MODEL"'tier_agent(.config; $t)' "$BL_STATE")"
+  model="$(bl_tier_model "$1")"
+  if [ -n "$agent" ]; then
+    printf 'Spawn one worker: Agent tool, subagent_type "%s", isolation "worktree". Pass the printed prompt verbatim as the prompt.' "$agent"
+  elif [ "$model" = "inherit" ]; then
+    printf 'Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree". Pass the printed prompt verbatim as the prompt.'
+  else
+    printf 'Spawn one worker: Agent tool, subagent_type "general-purpose", isolation "worktree", model "%s". Pass the printed prompt verbatim as the prompt.' "$model"
+  fi
+}
+
 # Item ids are plain numbers for GitHub and free-form for BACKLOG.md.
 bl_ref() {
   if [ "$(bl_cfg source)" = "github" ]; then printf '#%s' "$1"; else printf '%s' "$1"; fi

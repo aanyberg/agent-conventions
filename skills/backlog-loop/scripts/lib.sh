@@ -190,25 +190,26 @@ bl_pr_field() {
   gh pr view "$1" --json "$2" --jq ".$2" 2>/dev/null
 }
 
-# Run the project's test, lint and build commands in the current directory.
-# Prints one line per failing class; returns 0 only when all pass.
-bl_run_checks() {
-  local class cmd rc failed=0 out mins
-  mins="$(bl_limit baseline_minutes)"
-  out="$BL_DIR/checks.out"
-  for class in test lint build; do
-    cmd="$(bl_cfg "$class")"
-    case "$cmd" in "" | none) continue ;; esac
-    bl_with_deadline $((${mins:-30} * 60)) "$out" "$cmd"
-    rc=$?
-    if [ "$rc" -ne 0 ]; then
-      failed=1
-      if [ "$rc" -eq 124 ]; then
-        printf '%s: "%s" hit the %s minute deadline\n' "$class" "$cmd" "${mins:-30}"
-      else
-        printf '%s: "%s" exited %s: %s\n' "$class" "$cmd" "$rc" "$(tail -n 3 "$out" | tr '\n' ' ')"
-      fi
-    fi
-  done
-  return "$failed"
+# bl_commit_checks <repo> <sha>: CI result of one commit.
+# Prints green | red | pending | none, then the names of red checks.
+bl_commit_checks() {
+  local rows tab
+  tab="$(printf '\t')"
+  rows="$(
+    gh api "repos/$1/commits/$2/check-runs" \
+      --jq '.check_runs[] | "\(.name)\t\(.status // "completed")\t\(.conclusion // "")"' 2>/dev/null
+    gh api "repos/$1/commits/$2/status" \
+      --jq '.statuses[] | "\(.context)\t\(if .state == "pending" then "in_progress" else "completed" end)\t\(.state)"' 2>/dev/null
+  )"
+  printf '%s\n' "$rows" | awk -F "$tab" '
+    $1 == "" { next }
+    { seen = 1 }
+    $3 ~ /^(failure|timed_out|cancelled|action_required|startup_failure|error)$/ { red = red " " $1; next }
+    $2 != "completed" { running = 1 }
+    END {
+      if (red != "") print "red" red
+      else if (running) print "pending"
+      else if (seen) print "green"
+      else print "none"
+    }'
 }

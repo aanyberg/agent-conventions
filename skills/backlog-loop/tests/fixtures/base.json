@@ -4,7 +4,10 @@
     "id": "20260101-000000",
     "status": "running",
     "session": "dry",
-    "flags": { "plan_only": false, "no_merge": false },
+    "flags": {
+      "plan_only": false,
+      "no_merge": false
+    },
     "started_at": 1000,
     "started_iso": "2026-01-01T00:00:00Z",
     "segment_started_at": 1000,
@@ -22,11 +25,7 @@
     "path": "BACKLOG.md",
     "base_branch": "main",
     "repo": "example/fixture",
-    "test": "true",
-    "lint": "none",
-    "build": "none",
     "merge_method": "squash",
-    "ci": "required",
     "research_web": true,
     "limits": {
       "max_attempts": 3,
@@ -38,20 +37,19 @@
       "max_iterations": 100,
       "max_hours": 12,
       "worker_wait_minutes": 120,
-      "baseline_minutes": 30,
       "max_batch_items": 15
     }
   },
   "items": [
-    { "id": "1", "title": "Add greeting", "url": null, "status": "todo", "batch": 1, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false },
-    { "id": "2", "title": "Add greeting tests", "url": null, "status": "todo", "batch": 1, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false },
-    { "id": "3", "title": "Add farewell", "url": null, "status": "todo", "batch": 2, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false },
-    { "id": "4", "title": "Pick a date format", "url": null, "status": "todo", "batch": 3, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false },
-    { "id": "5", "title": "Sync with billing API", "url": null, "status": "todo", "batch": 3, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false }
+    {"id": "1", "title": "Add greeting", "url": null, "status": "todo", "batch": 1, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false},
+    {"id": "2", "title": "Add greeting tests", "url": null, "status": "todo", "batch": 1, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false},
+    {"id": "3", "title": "Add farewell", "url": null, "status": "todo", "batch": 2, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false},
+    {"id": "4", "title": "Pick a date format", "url": null, "status": "todo", "batch": 3, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false},
+    {"id": "5", "title": "Sync with billing API", "url": null, "status": "todo", "batch": 3, "attempts": 0, "last_error": null, "pending": null, "research": "none", "research_passes": 0, "question": null, "decision": null, "confidence": null, "needs_review": false, "blocked_reason": null, "preblocked": false}
   ],
   "batches": [
-    { "id": 1, "kind": "items", "theme": "Greeting", "title": null, "rationale": null, "items": ["1", "2"], "order": 1, "depends_on": [], "status": "todo", "phase": null, "tries": 1, "branch": null, "old_branches": [], "pushed": false, "pr": null, "revert_pr": null, "head_sha": null, "premerge_sha": null, "merge_commit": null, "ci_reruns": 0, "ci_polls": 0, "ci_started_at": null, "worker_started_at": null, "fixes": 0, "failures": 0, "conflict_attempts": 0, "requeues": 0, "merge_tries": 0, "removed": [], "last_error": null },
-    { "id": 2, "kind": "items", "theme": "Farewell", "title": null, "rationale": null, "items": ["3"], "order": 2, "depends_on": [], "status": "todo", "phase": null, "tries": 1, "branch": null, "old_branches": [], "pushed": false, "pr": null, "revert_pr": null, "head_sha": null, "premerge_sha": null, "merge_commit": null, "ci_reruns": 0, "ci_polls": 0, "ci_started_at": null, "worker_started_at": null, "fixes": 0, "failures": 0, "conflict_attempts": 0, "requeues": 0, "merge_tries": 0, "removed": [], "last_error": null },
-    { "id": 3, "kind": "items", "theme": "Dates and billing", "title": null, "rationale": null, "items": ["4", "5"], "order": 3, "depends_on": [1], "status": "todo", "phase": null, "tries": 1, "branch": null, "old_branches": [], "pushed": false, "pr": null, "revert_pr": null, "head_sha": null, "premerge_sha": null, "merge_commit": null, "ci_reruns": 0, "ci_polls": 0, "ci_started_at": null, "worker_started_at": null, "fixes": 0, "failures": 0, "conflict_attempts": 0, "requeues": 0, "merge_tries": 0, "removed": [], "last_error": null }
+    {"id": 1, "kind": "items", "theme": "Greeting", "title": null, "rationale": null, "items": ["1", "2"], "order": 1, "depends_on": [], "status": "todo", "phase": null, "tries": 1, "branch": null, "old_branches": [], "pushed": false, "pr": null, "revert_pr": null, "head_sha": null, "premerge_sha": null, "merge_commit": null, "ci_reruns": 0, "ci_polls": 0, "ci_started_at": null, "worker_started_at": null, "fixes": 0, "failures": 0, "conflict_attempts": 0, "requeues": 0, "merge_tries": 0, "removed": [], "last_error": null},
+    {"id": 2, "kind": "items", "theme": "Farewell", "title": null, "rationale": null, "items": ["3"], "order": 2, "depends_on": [], "status": "todo", "phase": null, "tries": 1, "branch": null, "old_branches": [], "pushed": false, "pr": null, "revert_pr": null, "head_sha": null, "premerge_sha": null, "merge_commit": null, "ci_reruns": 0, "ci_polls": 0, "ci_started_at": null, "worker_started_at": null, "fixes": 0, "failures": 0, "conflict_attempts": 0, "requeues": 0, "merge_tries": 0, "removed": [], "last_error": null},
+    {"id": 3, "kind": "items", "theme": "Dates and billing", "title": null, "rationale": null, "items": ["4", "5"], "order": 3, "depends_on": [1], "status": "todo", "phase": null, "tries": 1, "branch": null, "old_branches": [], "pushed": false, "pr": null, "revert_pr": null, "head_sha": null, "premerge_sha": null, "merge_commit": null, "ci_reruns": 0, "ci_polls": 0, "ci_started_at": null, "worker_started_at": null, "fixes": 0, "failures": 0, "conflict_attempts": 0, "requeues": 0, "merge_tries": 0, "removed": [], "last_error": null}
   ]
 }

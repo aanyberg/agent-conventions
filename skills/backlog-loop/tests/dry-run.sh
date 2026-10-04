@@ -166,7 +166,7 @@ ISO 8601, because the fixture has no locale handling to build on.
 
 ## Evidence
 
-- `checks.sh:1`: no locale tooling in the repository.
+- `CLAUDE.md:1`: no locale tooling in the repository.
 
 ## Assumptions
 
@@ -270,6 +270,7 @@ case "$tree" in *feature-5.txt* | *.ci-fail*) not_ok "origin/main has no blocked
 assert_eq "the main checkout follows origin/main" "$(git rev-parse origin/main)" "$(git rev-parse HEAD)"
 assert_empty "no worktrees are left behind" "$(git worktree list --porcelain | grep '^branch refs/heads/backlog-loop/' || true)"
 
+assert_contains "run.log records actions while the run is live" "next action=merge" "$(cat "$DIR/run.log")"
 report="$("$S/report.sh")"
 assert_contains "report: headline" "Backlog loop finished: done" "$report"
 assert_contains "report: item counts" "Items:   4 merged, 1 blocked, 0 remaining" "$report"
@@ -277,7 +278,10 @@ assert_contains "report: blocked reason" "Reason: the billing API rejects calls 
 assert_contains "report: review line" "decided with low confidence, see decisions/4.md" "$report"
 assert_contains "report: retries" "batch 2 (1 fix, 1 CI rerun)" "$report"
 assert_eq "report.md is written" "yes" "$([ -s "$DIR/report.md" ] && echo yes)"
-assert_contains "run.log records actions" "next action=merge" "$(cat "$DIR/run.log")"
+exists() { if [ -e "$DIR/$1" ]; then echo kept; else echo gone; fi; }
+assert_eq "a finished run keeps state, report and plan" "kept kept kept" "$(exists state.json) $(exists report.md) $(exists plan.md)"
+assert_eq "a finished run drops logs, prompts and working files" "gone gone gone" "$(exists run.log) $(exists prompts) $(exists pr-body.md)"
+assert_eq "a later report still works and leaves no log behind" "gone" "$("$S/report.sh" >/dev/null; exists run.log)"
 
 GH="$DIR/dry-run/gh.json"
 if [ "$SOURCE" = "github" ]; then

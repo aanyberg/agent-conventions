@@ -51,3 +51,5 @@ text="$(jq -r --arg dir ".planning/backlog-loop" '
 
 bl_log "report written status=$(bl_get '.run.status')"
 printf '%s\n' "$text"
+# A finished run keeps its report and state, not its logs and working files.
+"$BL_SCRIPT_DIR/state.sh" purge-logs

@@ -174,7 +174,7 @@ target="${decision#*	}"
 # Waiting does not use up the iteration budget.
 if [ "$PEEK" -eq 0 ]; then
   case "$action" in
-    wait_ci | wait_worker) ;;
+    wait_ci | wait_worker | verify) ;;
     *)
       st tick
       ITERATION="$(get '.run.total_iterations')"
@@ -221,7 +221,8 @@ EOT
   verify)
     emit verify "Confirm batch $target is merged and that $base is still green." --argjson batch "$target" \
       --argjson pr "$(bq "$target" '.pr')" <<EOT
-Run with a 10 minute Bash timeout: $S/verify-batch.sh $target post-merge
+Run: $S/verify-batch.sh $target post-merge
+While it prints PENDING, run the same command again. It reads CI on $base; nothing is tested locally.
 EOT
     ;;
 

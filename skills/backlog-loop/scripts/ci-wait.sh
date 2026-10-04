@@ -33,10 +33,6 @@ poll_once() {
   state="$(bl_pr_checks "$1")"
   case "$state" in
     green | red) echo "$state" ;;
-    none)
-      # No checks at all: fine for `ci: none` once GitHub had time to start any.
-      if [ "$(bl_cfg ci)" = "none" ] && [ "$2" -ge 1 ]; then echo green; else echo pending; fi
-      ;;
     *) echo pending ;;
   esac
 }

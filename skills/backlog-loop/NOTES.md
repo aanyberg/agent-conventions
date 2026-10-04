@@ -49,14 +49,18 @@ guarded, because jq 1.6 exits 0 there.
 | §5: BACKLOG.md markers | Written once, at the end, by a final "status" pull request. | The guard forbids direct pushes to the base branch, and an uncommitted edit would dirty the main checkout between merges. |
 | §6: "Issues: can comment and set labels" | Inferred from write permission and issues being enabled. Labels are created after preflight passes. | A probe comment would spam a real issue, and preflight must change nothing before it passes. |
 | §6: "auto-merge enabled if used" | Always passes. | Auto-merge is not used: the loop merges after verifying the checks itself. |
-| §6: "Claude tools" probes | `preflight.sh --probes` prints the commands and `SKILL.md` has Claude run them. The baseline then runs test, lint and build again inside the script. | The probe exercises Claude's permission rules; the script run is the result that is trusted. Cost: the suite runs twice at the start. |
+| §6: "Baseline: test, lint and build pass on a clean base branch" | Preflight runs no test suite. The baseline is the CI result of the base branch head, read through `gh`: red fails, still running or no result is a warning. | Changed after the first real trial: running the suite locally before the loop was slow, and CI is the gate the loop trusts everywhere else. |
+| §6: "Claude tools" probes per class (git, gh, test, lint, build) | `preflight.sh --probes` prints a `git` and a `gh` command only. | Probing test, lint and build meant running the suite. A missing rule for those shows when the first worker runs them. |
+| §4: `test`, `lint`, `build` commands | Not configured and never run. | Decided after the first real trial: nothing is gated locally, the repository's CI is the only test gate. A repository without CI on pull requests fails preflight. |
+| §8 step 2: the worker runs test, lint and build before reporting | The worker writes tests but runs nothing; it pushes and CI judges. | Same decision. The cost is that a mistake a local run would have caught now uses one CI round and one attempt. |
+| §8 step 7: post-merge check on the base branch | Reads CI for the merge commit on the base branch, with the CI deadline. Red reverts the merge. When the base branch has no CI of its own, or it does not finish in time, the green pull request result stands, because the PR contained the base tip when it merged. | Same decision. |
 | §6: "Research: web search and fetch available" | Detected from `deny` and `ask` rules on `WebFetch`/`WebSearch` in settings. | A script cannot call Claude's tools. |
 | §8 step 1: rebase on base | A fresh worker branch starts from `origin/<base>`. Before a merge the PR branch is updated with `gh pr update-branch --rebase` (server side). Conflicts are fixed with a merge commit. | A local rebase needs a force-push, which the guard forbids. |
 | §8: minimum action set | Added `preflight`, `open_pr`, `wait_ci`, `rerun_ci`, `rebase_batch`, `resolve_conflict`, `wait_worker`, `sync_backlog`. | One action per state keeps each instruction list short and each state testable. |
 | §10: CI red "counts as an attempt for the affected items" | Counts for every item in the batch. `state.sh record poison` gives the other items their attempts back once the culprit is named. | The script cannot know which item caused a red PR. |
 | §11 rule 4 | Unchanged, plus two extra "allow" cases: background workers in flight, and one block before Claude Code's cap. A run owned by another session is ignored. | See section 1. |
 | §11 guard | Also denies: `git push --all`/`--mirror`, `git clean -x`, `gh api .../pulls/N/merge`, every `gh pr merge` under `--no-merge`, and a merge of a batch PR that `verify-batch.sh pre-merge` did not just verify. | Same intent as the four listed rules. |
-| §12 limits | Three more: `worker-wait-minutes` 120, `baseline-minutes` 30, `max-batch-items` 15. Lock staleness is 15 minutes (`BACKLOG_LOOP_LOCK_STALE_MINUTES`). | "Every wait has a deadline" needs a worker and a baseline deadline. |
+| §12 limits | Two more: `worker-wait-minutes` 120, `max-batch-items` 15. Lock staleness is 15 minutes (`BACKLOG_LOOP_LOCK_STALE_MINUTES`). | "Every wait has a deadline" needs a worker deadline. |
 | §12 max loop iterations | `wait_ci` and `wait_worker` do not count. A resume starts a fresh iteration and wall-clock budget; totals are kept in `run.total_iterations`. | A 45-minute CI wait is 27 polls and would eat the budget. |
 | §13 report | Extra lines when they apply: `Merge:` (PRs awaiting the user with `--no-merge`), `Needs:` under a blocked item, re-queues in `Retries:`. | The spec format has no place for them. |
 | §14 dry run | The stubs live in `tests/stubs/`. `lib.sh` puts them on `PATH` when `BACKLOG_LOOP_DRY_RUN=1`. The stub `git` also handles `fetch` and `pull`. | Without them the scripts would reach the network. |
@@ -69,10 +73,8 @@ guarded, because jq 1.6 exits 0 there.
 - The `## Backlog loop` section is read from `CLAUDE.md`, then
   `.claude/CLAUDE.md`, then `AGENTS.md`. Lines are `- key: value`; backticks
   around the value are stripped.
-- `test` is required. `lint` and `build` must be set, detected, or `none`.
 - `source` is detected only when exactly one of the backlog file and labelled
   issues exists. Both or neither fails preflight.
-- `ci: none` is an extra key for repositories without CI.
 - An unfinished run resumes with the configuration it started with.
 
 **State**
@@ -87,6 +89,9 @@ guarded, because jq 1.6 exits 0 there.
 - The lock holds the session id. Its mtime is the heartbeat, refreshed by
   `next.sh`, `ci-wait.sh`, `state.sh record` and the guard hook. Another
   session may take it over after 15 minutes without a heartbeat.
+- When a run is done its branches, worktrees, `run.log` and working files are
+  removed; state, plan, report and decision records stay. A halted or stalled
+  run keeps everything.
 - A finished run is moved to `archive/<run id>/` when the next run starts.
 - Branch names: `backlog-loop/<run id>/b<batch>-t<tries>`. A re-queued or
   reset batch gets a new branch.

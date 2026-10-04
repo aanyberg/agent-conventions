@@ -58,7 +58,7 @@ tree. Preflight checks all of that and prints every problem with its fix:
 Preflight: 10 passed, 2 failed, 1 warning
 FAIL  Branch rules: main requires 1 approving review
       Fix: allow bypass for your account, or run with --no-merge
-FAIL  Baseline: 'npm test' fails on main: 3 tests failed
+FAIL  Baseline: CI is red on main: test
       Fix: main must be green before starting
 WARN  Research: deny rule 'WebFetch' in .claude/settings.json; research uses the codebase only
 Nothing was changed.
@@ -69,15 +69,16 @@ Nothing was changed.
 Add a `## Backlog loop` section to the project's `CLAUDE.md` (`.claude/CLAUDE.md`
 and `AGENTS.md` are read too). Every key is optional when it can be detected.
 
+The loop tests nothing locally. The repository's CI is the only gate: it must
+run on pull requests, and a batch merges only when every check is green. A
+repository without CI fails preflight.
+
 ```markdown
 ## Backlog loop
 
 - source: github
 - label: backlog
 - base-branch: main
-- test: npm test
-- lint: npm run lint
-- build: none
 - merge-method: squash
 ```
 
@@ -87,10 +88,7 @@ and `AGENTS.md` are read too). Every key is optional when it can be detected.
 | `label` | `backlog` | GitHub: open issues with this label are the backlog. |
 | `path` | `BACKLOG.md` | File: the backlog file. |
 | `base-branch` | repository default | Branch the PRs target. |
-| `test` | detected | Required. Detected from `package.json`, `Makefile`, `Cargo.toml`, `go.mod`, `pyproject.toml`. |
-| `lint`, `build` | detected | A command, or `none`. Preflight fails when one is neither set nor detectable. |
 | `merge-method` | `squash` | `squash`, `merge` or `rebase`. |
-| `ci` | `required` | `none` for a repository without CI: local test, lint and build are then the only gate. |
 
 Limits, all optional:
 
@@ -105,7 +103,6 @@ Limits, all optional:
 | `max-iterations` | 100 |
 | `max-hours` | 12 |
 | `worker-wait-minutes` | 120 |
-| `baseline-minutes` (per command) | 30 |
 | `max-batch-items` | 15 |
 
 ### Backlog sources
@@ -146,9 +143,7 @@ Set this up once, before the first unattended run.
     "allow": [
       "Bash(/Users/you/.claude/skills/backlog-loop/scripts/*)",
       "Bash(git *)",
-      "Bash(gh *)",
-      "Bash(npm test)",
-      "Bash(npm run lint)"
+      "Bash(gh *)"
     ]
   },
   "env": {
@@ -157,8 +152,9 @@ Set this up once, before the first unattended run.
 }
 ```
 
-- Use the absolute path of your install in the first rule, and your own test,
-  lint and build commands in place of the `npm` ones.
+- Use the absolute path of your install in the first rule.
+- No test, lint or build command is needed: the loop runs none of them. CI on
+  each pull request is the only test gate.
 - `Bash(gh *)` matters in auto mode: its classifier blocks merging a pull
   request that no human approved, unless an allow rule matches. Without the
   rule, use `--no-merge`.
@@ -166,23 +162,20 @@ Set this up once, before the first unattended run.
   blocks in a row. The gate stays one below whatever the cap is and leaves the
   run resumable, so the default is safe; a higher cap means fewer manual
   `/backlog-loop` restarts on a long run. `0` removes the cap.
-- Slow test suites: the Bash tool stops waiting after 10 minutes. Raise
-  `BASH_MAX_TIMEOUT_MS` in `env` if preflight or the post-merge check needs
-  longer.
 
 Other modes:
 
 | Mode | Works? |
 |---|---|
 | `auto` | Yes, recommended, with the rules above. |
-| `dontAsk` | Yes, for a strict setup: everything not in `allow` is denied, so list test, lint, build and the file tools. |
+| `dontAsk` | Yes, for a strict setup: everything not in `allow` is denied, so list the file tools too. |
 | `acceptEdits`, `default` (Manual) | Only attended: commands outside the allow list prompt and the run waits for you. |
 | `plan` | No: nothing can be written. |
 | `bypassPermissions` | Works, but only in a container or VM. |
 
-Preflight helps: the skill has Claude run one probe command per class (git, gh,
-test, lint, build) at the very start, so a missing rule shows while you are
-still there. It also fails on `deny` and `ask` rules that match commands the
+Preflight helps: the skill has Claude run a `git` and a `gh` probe command at
+the very start, so a missing rule shows while you are still there. It also
+fails on `deny` and `ask` rules that match commands the
 loop needs, in user, project, local and managed settings.
 
 What the run can never do, enforced by the guard hook while a run is active:
@@ -195,11 +188,13 @@ and the base branch must not require human approval (or use `--no-merge`).
 ## What a run looks like
 
 1. **Preflight.** Tools, auth, push probe, branch rules, CI, clean tree,
-   worktree probe, green baseline, permission rules, lock.
+   worktree probe, permission rules, lock. The baseline is the CI result of the
+   base branch head, read from GitHub; no tests are run locally.
 2. **Plan.** All items are read and clustered; see `reference/batching.md`.
 3. **Per batch.** A worker in its own worktree implements it, one commit per
-   item. One PR. CI is awaited with a deadline. The PR is brought up to date
-   with the base branch, merged, and the base branch is checked again.
+   item, and runs no tests. One PR. CI is awaited with a deadline. The PR is
+   brought up to date with the base branch and merged. CI on the base branch is
+   then read for the merge commit; if it is red the merge is reverted.
 4. **Report.** Printed and written to `.planning/backlog-loop/report.md`:
 
 ```text
@@ -213,13 +208,20 @@ Retries: batch 1 (1 fix), batch 2 (1 CI rerun)
 Report:  .planning/backlog-loop/report.md
 ```
 
+When a run reaches `done`, the scripts clean up: branches and worktrees of
+blocked and closed batches are removed (merged ones already were), leftover
+`worktree-*` branches without commits of their own are deleted, and `run.log`,
+`prompts/` and the other working files are removed. `state.json`, `plan.md`,
+`report.md` and `decisions/` stay as the record. A halted or stalled run keeps
+everything, so it can be resumed and diagnosed.
+
 Files in `.planning/backlog-loop/` (ignored by git):
 
 | File | Content |
 |---|---|
 | `state.json` | The run. Written only by `scripts/state.sh`. |
 | `plan.md` | The batches, human readable. |
-| `run.log` | Every action, decision and script result, with timestamps. |
+| `run.log` | Every action, decision and script result, with timestamps. Removed when the run is done. |
 | `report.md` | The summary above, plus one line per batch. |
 | `decisions/<item>.md` | Decision record for each unclear item. |
 | `lock` | Session that owns the run. |
@@ -254,7 +256,6 @@ To look without changing anything:
 | Hooks do nothing | The skill is not at `~/.claude/skills/backlog-loop` or `<project>/.claude/skills/backlog-loop`. Set `BACKLOG_LOOP_HOME`. Check with `/hooks`. |
 | `Backlog loop halted: base branch was red ...` | A merge broke the base branch and was reverted. Its items are blocked with the reason. `/backlog-loop --resume` continues with the remaining batches. |
 | `halted: remaining batches depend on pull requests that wait for a human merge` | `--no-merge`: merge the listed PRs, then `/backlog-loop --resume`. |
-| Preflight or the post-merge check is cut off | The suite takes longer than the Bash tool allows. Raise `BASH_MAX_TIMEOUT_MS`, and `baseline-minutes` if it exceeds 30 minutes. |
 | State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active. |
 
 ## Tests
@@ -262,6 +263,12 @@ To look without changing anything:
 ```bash
 tests/run.sh            # everything, about three minutes
 tests/run.sh --quick    # unit suites only
+```
+
+The suite runs in CI on every pull request that touches the skill
+(`.github/workflows/backlog-loop.yml`). To run parts by hand:
+
+```bash
 tests/dry-run.sh github # the full loop on a fixture repository, no network
 tests/dry-run.sh file
 ```

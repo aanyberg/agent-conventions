@@ -78,19 +78,10 @@ make_fixture() {
     git config user.email "dry-run@example.com"
     git config user.name "Dry Run"
     git config commit.gpgsign false
-    cat >checks.sh <<'EOS'
-#!/bin/sh
-# Fixture checks: "test" fails while a file named .break-base exists.
-case "$1" in
-  test) [ ! -e .break-base ] || { echo "test failed: .break-base present"; exit 1; } ;;
-  lint) ! grep -rl "LINT-ERROR" --include='*.txt' . >/dev/null 2>&1 || { echo "lint failed"; exit 1; } ;;
-esac
-echo "$1 ok"
-EOS
     {
       printf '# Fixture\n\n## Backlog loop\n\n'
       printf -- '- source: %s\n- label: backlog\n- path: BACKLOG.md\n- base-branch: main\n' "$source"
-      printf -- '- test: `sh ./checks.sh test`\n- lint: sh ./checks.sh lint\n- build: none\n- merge-method: squash\n'
+      printf -- '- merge-method: `squash`\n'
     } >CLAUDE.md
     if [ "$source" = "file" ]; then
       cat >BACKLOG.md <<'EOS'

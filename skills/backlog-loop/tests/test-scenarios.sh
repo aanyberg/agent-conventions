@@ -416,6 +416,20 @@ done
 assert_eq "batch 1 is closed, no PR" "closed/null/0" "$(bq 1 '"\(.status)/\(.pr)"')/$(jq '.prs | length' "$GH")"
 assert_eq "its items moved to batch 2" "2/2" "$(iq 1 '.batch')/$(iq 2 '.batch')"
 
+echo "scenario: an item branch with two commits, or without the trailer, is not accepted"
+new_repo
+start "$SPLIT"
+branch="$("$S/state.sh" record item-started 1)"
+worker "$branch" origin/main "echo a > a.txt; git add -A; git commit -q -m 'one' -m 'Backlog-Item: 1'; echo b > b.txt; git add -A; git commit -q -m 'two' -m 'Backlog-Item: 1'"
+"$S/state.sh" record item-done 1 >/dev/null
+assert_eq "two commits: attempt counted, item moved on" "1/2" "$(iq 1 '.attempts')/$(iq 1 '.batch')"
+assert_contains "the reason counts the commits" "found 2" "$(iq 1 '.last_error')"
+branch="$("$S/state.sh" record item-started 2)"
+worker "$branch" origin/main "echo c > c.txt; git add -A; git commit -q -m 'no trailer'"
+"$S/state.sh" record item-done 2 >/dev/null
+assert_eq "no trailer: attempt counted, item moved on" "1/2" "$(iq 2 '.attempts')/$(iq 2 '.batch')"
+assert_contains "the reason names the trailer" "trailer Backlog-Item: 2" "$(iq 2 '.last_error')"
+
 # ------------------------------------------------------------------------------------
 echo "scenario: batch-commits squashed"
 new_repo

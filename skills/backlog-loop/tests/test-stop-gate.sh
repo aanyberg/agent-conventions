@@ -123,6 +123,12 @@ assert_eq "workers in the background: allowed" "allow" "$(decision)"
 assert_eq "waiting for workers is not a stall" "running/0" "$(sget '"\(.run.status)/\(.run.unchanged_gates)"')"
 gate '{"background_tasks": []}'
 assert_eq "no worker actually running: blocks" "block" "$(decision)"
+use_state base.json '.batches |= map(if .id == 1 then .status = "in-progress" | .phase = "fix" | .pr = 201 else . end)'
+gate '{"background_tasks": [{"id": "t1", "type": "subagent", "status": "running"}]}'
+assert_eq "fix worker in the background (phase still fix): allowed" "allow" "$(decision)"
+gate '{"stop_hook_active": true, "background_tasks": [{"id": "t1", "type": "subagent", "status": "running"}]}'
+gate '{"stop_hook_active": true, "background_tasks": [{"id": "t1", "type": "subagent", "status": "running"}]}'
+assert_eq "waiting for a fix worker is not a stall" "running/0" "$(sget '"\(.run.status)/\(.run.unchanged_gates)"')"
 use_state base.json
 export CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=3
 gate

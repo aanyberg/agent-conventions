@@ -52,6 +52,9 @@ again resumes it.
   pull request that `verify-batch.sh <batch> pre-merge` has not declared READY.
 - Hard blockers are only: missing credentials or external access, a destructive
   or irreversible operation, and three failed attempts. Ambiguity is never one.
+- `/backlog-loop` is user-only. Never start, restart or resume the loop
+  yourself, and never call it through the Skill tool. When the run is halted or
+  stalled, show the report and stop: the user runs `/backlog-loop --resume`.
 - A script that exits non-zero tells you what is wrong. Fix that, then run
   `next.sh`. Do not work around a script.
 
@@ -115,5 +118,5 @@ Arguments of this invocation: `$ARGUMENTS`
 ## Stopping
 
 A Stop hook sends you back to `next.sh` while work remains. It lets you stop
-when the run is done, halted, stalled, or waiting for background workers. If
+when the run is done, halted, stalled, or any background worker is running. If
 the turn ends early anyway, nothing is lost: `/backlog-loop` resumes from state.

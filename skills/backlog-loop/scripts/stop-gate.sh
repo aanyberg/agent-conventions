@@ -58,13 +58,15 @@ decide() {
       return 0
       ;;
     preflight) return 0 ;;
-    wait_worker)
-      if [ "$(printf '%s' "$input" | jq '[.background_tasks[]? | select(.status != "completed" and .status != "failed")] | length')" -gt 0 ]; then
-        bl_log "background workers in flight, allowing stop"
-        return 0
-      fi
-      ;;
   esac
+
+  # Any action can have a background worker in flight (fix_ci, resolve_conflict
+  # and drop_item spawn one before the state changes), so the check is not
+  # limited to wait_worker. Its completion notification brings the run back.
+  if [ "$(printf '%s' "$input" | jq '[.background_tasks[]? | select(.status != "completed" and .status != "failed")] | length')" -gt 0 ]; then
+    bl_log "background workers in flight, allowing stop: action=$action"
+    return 0
+  fi
 
   # Rule 4.
   hash="$(bl_hash)" || return 1

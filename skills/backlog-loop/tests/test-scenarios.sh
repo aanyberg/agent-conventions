@@ -56,6 +56,7 @@ worker() {
 }
 
 # What the simulated worker writes for an item. Scenarios override this.
+# shellcheck disable=SC2329
 item_snippet() { printf "echo 'feature %s' > feature-%s.txt;" "$1" "$1"; }
 
 implement() {
@@ -117,7 +118,7 @@ SPLIT='{"batches":[{"theme":"A","items":["1","2"]},{"theme":"B","items":["3"]},{
 echo "scenario: preflight collects every failure and changes nothing"
 new_repo
 touch .break-base
-git add -A && git commit -q -m "break the base" && git update-ref refs/remotes/origin/main HEAD
+git add .break-base && git commit -q -m "break the base" && git update-ref refs/remotes/origin/main HEAD
 echo "dirty" >>CLAUDE.md
 jq '.rules = [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
   | .repo.squashMergeAllowed = false' "$GH" >"$GH.t" && mv "$GH.t" "$GH"
@@ -156,7 +157,7 @@ assert_contains "--resume without a run fails" "there is no unfinished run" "$ou
 new_repo
 mkdir -p .claude
 echo '{"permissions": {"deny": ["Bash(git push *)", "WebFetch"]}}' >.claude/settings.json
-git add -A && git commit -q -m "settings" && git update-ref refs/remotes/origin/main HEAD
+git add .claude && git commit -q -m "settings" && git update-ref refs/remotes/origin/main HEAD
 out="$("$S/preflight.sh" --session dry 2>&1)"
 assert_contains "a deny rule on a needed command fails" "FAIL  Claude tools: deny rule 'Bash(git push *)'" "$out"
 assert_contains "a denied web tool is a warning" "WARN  Research: deny rule 'WebFetch'" "$out"
@@ -200,7 +201,7 @@ start "$SPLIT" && run_until fix_ci
 assert_eq "the red batch is batch 1" "1" "$TARGET"
 "$S/state.sh" record poison 1 2 --reason "item 2 breaks CI" >/dev/null
 next
-assert_eq "next action is drop_item" "drop_item/2" "$ACTION/$TARGET"
+assert_eq "next action is drop_item" "drop_item/2" "$ACTION/$(printf '%s' "$OUT" | jq -r '.item')"
 "$S/state.sh" cleanup 1
 prompt="$("$S/state.sh" worker-prompt 1 --mode drop --item 2)"
 assert_contains "drop prompt names the trailer" "Backlog-Drop: 2" "$prompt"
@@ -234,6 +235,7 @@ done
 assert_eq "the run finishes" "done" "$ACTION"
 assert_eq "item 2 is blocked after three attempts, the rest is merged" "1,3,4,5/2/3" \
   "$(jq -r '[.items[] | select(.status == "merged") | .id] | join(",")' "$STATE")/$(jq -r '[.items[] | select(.status == "blocked") | .id] | join(",")' "$STATE")/$(iq 2 '.attempts')"
+assert_eq "a blocked retry does not block the batches that depended on the original" "merged" "$(bq 3 '.status')"
 assert_eq "the retry batch ends blocked and its PR is closed" "blocked/CLOSED" "$(bq 4 '.status')/$(jq -r '.prs[] | select(.head | test("b4-")) | .state' "$GH")"
 case "$(git ls-tree -r --name-only origin/main | tr '\n' ' ')" in
   *feature-2.txt* | *.ci-fail*) not_ok "nothing of item 2 reached the base branch" ;;
@@ -353,6 +355,10 @@ run_until "done"
 assert_eq "the resumed run finishes" "done/5" "$ACTION/$(jq '[.items[] | select(.status == "merged")] | length' "$STATE")"
 assert_eq "three PRs, none duplicated" "3" "$(jq '.prs | length' "$GH")"
 out="$("$S/preflight.sh" --session again 2>&1)"
+assert_contains "with an empty backlog a new run does not start" "FAIL  Issues: no open issues carry the label 'backlog'" "$out"
+jq '.issues += [{number: 6, title: "A new item", labels: ["backlog"], state: "OPEN", comments: []}]' "$GH" >"$GH.t" && mv "$GH.t" "$GH"
+out="$("$S/preflight.sh" --session again 2>&1)"
 assert_contains "after a finished run, a new run starts and the old one is archived" "Archived run" "$out"
+assert_eq "the new run has only the new item" "6" "$(jq -r '[.items[].id] | join(",")' "$STATE")"
 
 t_summary

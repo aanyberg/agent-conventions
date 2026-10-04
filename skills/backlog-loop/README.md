@@ -1,0 +1,274 @@
+# backlog-loop
+
+A Claude Code skill that implements every item in a project backlog without
+supervision. Items are clustered into a few themed pull requests (around ten
+for a hundred items). Each PR is gated on CI, merged, and verified on the base
+branch. Unclear items are researched and decided. Items that cannot be finished
+are marked blocked with a reason. The run survives compaction, crashes, usage
+limits and a closed terminal.
+
+Requires `git`, `gh` and `jq`, on macOS or Linux. Developed and checked against
+Claude Code 2.1.289, gh 2.102 and bash 3.2 (the macOS default).
+
+## Install
+
+Install with the [skills CLI](https://github.com/vercel-labs/skills):
+
+```bash
+npx skills add aanyberg/agent-conventions -g
+```
+
+Select `backlog-loop` and Claude Code. Or copy the directory by hand:
+
+```bash
+cp -R skills/backlog-loop ~/.claude/skills/backlog-loop
+```
+
+The skill must end up at `~/.claude/skills/backlog-loop/` (personal) or
+`<project>/.claude/skills/backlog-loop/` (project). The hooks look in those two
+places, because Claude Code does not expand `${CLAUDE_SKILL_DIR}` in hook
+commands. For any other location, set `BACKLOG_LOOP_HOME` to the skill
+directory in the `env` block of your settings.
+
+## Use
+
+```text
+/backlog-loop                 start a run, or resume an unfinished one
+/backlog-loop --plan-only     preflight and plan, then stop for review
+/backlog-loop --resume        continue from saved state
+/backlog-loop --no-merge      stop each batch at a green PR; you merge
+/backlog-loop --gitignore     ignore the state directory in .gitignore
+```
+
+| Argument | Effect |
+|---|---|
+| none | Runs preflight, plans, then loops until done. Resumes when an unfinished run exists. |
+| `--plan-only` | Writes `.planning/backlog-loop/plan.md` and halts. `/backlog-loop --resume` executes the plan. |
+| `--resume` | Requires an unfinished run. Reconciles it with GitHub and continues. |
+| `--no-merge` | Every batch stops at a green PR. Batches that depend on an unmerged batch wait: merge, then `--resume`. |
+| `--gitignore` | Writes `.planning/backlog-loop/` to `.gitignore` instead of `.git/info/exclude`. |
+
+Arguments combine, for example `/backlog-loop --plan-only --no-merge`.
+
+Start it from the repository's main checkout, on the base branch, with a clean
+tree. Preflight checks all of that and prints every problem with its fix:
+
+```text
+Preflight: 10 passed, 2 failed, 1 warning
+FAIL  Branch rules: main requires 1 approving review
+      Fix: allow bypass for your account, or run with --no-merge
+FAIL  Baseline: 'npm test' fails on main: 3 tests failed
+      Fix: main must be green before starting
+WARN  Research: deny rule 'WebFetch' in .claude/settings.json; research uses the codebase only
+Nothing was changed.
+```
+
+## Project configuration
+
+Add a `## Backlog loop` section to the project's `CLAUDE.md` (`.claude/CLAUDE.md`
+and `AGENTS.md` are read too). Every key is optional when it can be detected.
+
+```markdown
+## Backlog loop
+
+- source: github
+- label: backlog
+- base-branch: main
+- test: npm test
+- lint: npm run lint
+- build: none
+- merge-method: squash
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `source` | detected | `github` (issues) or `file`. Detected when only one of the two exists. |
+| `label` | `backlog` | GitHub: open issues with this label are the backlog. |
+| `path` | `BACKLOG.md` | File: the backlog file. |
+| `base-branch` | repository default | Branch the PRs target. |
+| `test` | detected | Required. Detected from `package.json`, `Makefile`, `Cargo.toml`, `go.mod`, `pyproject.toml`. |
+| `lint`, `build` | detected | A command, or `none`. Preflight fails when one is neither set nor detectable. |
+| `merge-method` | `squash` | `squash`, `merge` or `rebase`. |
+| `ci` | `required` | `none` for a repository without CI: local test, lint and build are then the only gate. |
+
+Limits, all optional:
+
+| Key | Default |
+|---|---|
+| `max-attempts` (per item) | 3 |
+| `ci-reruns` (per batch) | 1 |
+| `ci-wait-minutes` (per attempt) | 45 |
+| `research-passes` (per question) | 1 |
+| `parallel-batches` | 2 |
+| `stall-threshold` (unchanged gate checks) | 2 |
+| `max-iterations` | 100 |
+| `max-hours` | 12 |
+| `worker-wait-minutes` | 120 |
+| `baseline-minutes` (per command) | 30 |
+| `max-batch-items` | 15 |
+
+### Backlog sources
+
+**GitHub:** open issues with the label. Results are mirrored as comments and
+the labels `blocked` and `needs-review`; merged PRs close their issues with
+`Closes #<id>`. An issue that already carries `blocked` is skipped.
+
+**File:** `BACKLOG.md` with either layout:
+
+```markdown
+| ID | Title | Status | Notes |
+|---|---|---|---|
+| B-1 | Add greeting | ready | |
+
+- [ ] B-2: Add farewell
+```
+
+Rows with status `done`, `cancelled`, `merged` or `closed`, checked boxes, and
+everything under `## Archive` are skipped. Give checkbox items an id; without
+one the id is `item-<position>`, which shifts when the list is edited. At the
+end of the run one extra PR marks merged items done and annotates blocked ones
+with `BLOCKED: <reason>`.
+
+## Permissions for unattended runs
+
+The skill's `allowed-tools` covers its scripts, `git` and `gh`, but Claude Code
+applies that grant only to the turn that invoked the skill. After a background
+worker reports, after a resume, and inside workers, your own settings decide.
+Set this up once, before the first unattended run.
+
+**Recommended: auto mode plus a few allow rules.** In
+`.claude/settings.local.json` of the target repository:
+
+```json
+{
+  "permissions": {
+    "allow": [
+      "Bash(/Users/you/.claude/skills/backlog-loop/scripts/*)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(npm test)",
+      "Bash(npm run lint)"
+    ]
+  },
+  "env": {
+    "CLAUDE_CODE_STOP_HOOK_BLOCK_CAP": "30"
+  }
+}
+```
+
+- Use the absolute path of your install in the first rule, and your own test,
+  lint and build commands in place of the `npm` ones.
+- `Bash(gh *)` matters in auto mode: its classifier blocks merging a pull
+  request that no human approved, unless an allow rule matches. Without the
+  rule, use `--no-merge`.
+- `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`: Claude Code ends a turn after 8 Stop hook
+  blocks in a row. The gate stays one below whatever the cap is and leaves the
+  run resumable, so the default is safe; a higher cap means fewer manual
+  `/backlog-loop` restarts on a long run. `0` removes the cap.
+- Slow test suites: the Bash tool stops waiting after 10 minutes. Raise
+  `BASH_MAX_TIMEOUT_MS` in `env` if preflight or the post-merge check needs
+  longer.
+
+Other modes:
+
+| Mode | Works? |
+|---|---|
+| `auto` | Yes, recommended, with the rules above. |
+| `dontAsk` | Yes, for a strict setup: everything not in `allow` is denied, so list test, lint, build and the file tools. |
+| `acceptEdits`, `default` (Manual) | Only attended: commands outside the allow list prompt and the run waits for you. |
+| `plan` | No: nothing can be written. |
+| `bypassPermissions` | Works, but only in a container or VM. |
+
+Preflight helps: the skill has Claude run one probe command per class (git, gh,
+test, lint, build) at the very start, so a missing rule shows while you are
+still there. It also fails on `deny` and `ask` rules that match commands the
+loop needs, in user, project, local and managed settings.
+
+What the run can never do, enforced by the guard hook while a run is active:
+force-push, push to the base branch, `gh pr merge --admin`, merge a PR that is
+not verified green, and delete or hand-edit the state file.
+
+GitHub side: your account needs write access, the merge method must be enabled,
+and the base branch must not require human approval (or use `--no-merge`).
+
+## What a run looks like
+
+1. **Preflight.** Tools, auth, push probe, branch rules, CI, clean tree,
+   worktree probe, green baseline, permission rules, lock.
+2. **Plan.** All items are read and clustered; see `reference/batching.md`.
+3. **Per batch.** A worker in its own worktree implements it, one commit per
+   item. One PR. CI is awaited with a deadline. The PR is brought up to date
+   with the base branch, merged, and the base branch is checked again.
+4. **Report.** Printed and written to `.planning/backlog-loop/report.md`:
+
+```text
+Backlog loop finished: done
+Items:   14 merged, 1 blocked, 0 remaining
+PRs:     #201 #202 #203 #204 (4 PRs for 14 items)
+Blocked: #37 "Redesign address form"
+         Reason: needs production API credentials
+Review:  #29 decided with low confidence, see decisions/29.md
+Retries: batch 1 (1 fix), batch 2 (1 CI rerun)
+Report:  .planning/backlog-loop/report.md
+```
+
+Files in `.planning/backlog-loop/` (ignored by git):
+
+| File | Content |
+|---|---|
+| `state.json` | The run. Written only by `scripts/state.sh`. |
+| `plan.md` | The batches, human readable. |
+| `run.log` | Every action, decision and script result, with timestamps. |
+| `report.md` | The summary above, plus one line per batch. |
+| `decisions/<item>.md` | Decision record for each unclear item. |
+| `lock` | Session that owns the run. |
+| `archive/<run id>/` | Earlier runs. |
+
+## Resume
+
+Run `/backlog-loop` again. It works after a crash, a usage limit, a closed
+terminal, a halt or a stall. The state is reconciled with GitHub first: a
+merged PR is verified and counted, a closed PR resets its batch, a lost worker
+is started again. Merged batches are never redone. A resume also gives a fresh
+iteration and wall-clock budget.
+
+To look without changing anything:
+
+```bash
+~/.claude/skills/backlog-loop/scripts/state.sh status
+~/.claude/skills/backlog-loop/scripts/next.sh --peek
+~/.claude/skills/backlog-loop/scripts/report.sh
+```
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| `FAIL  Filesystem: another session (...) is running the loop` | A run is active, or the session that ran it died less than 15 minutes ago. If it is gone: delete `.planning/backlog-loop/lock` and run `/backlog-loop`. |
+| The run stopped although work remains | The Stop hook block cap was reached, or the turn ended on an API error. Run `/backlog-loop`. Raise `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` to see it less often. |
+| `Backlog loop stalled` | Nothing changed across two stop checks, usually because a command kept being denied. Read the last lines of `run.log`, fix the permission rule, `/backlog-loop --resume`. |
+| Claude waits on a permission prompt | A needed command is not in `allow`. Add it; see "Permissions for unattended runs". |
+| Merge is denied in auto mode | The classifier blocks merging unapproved PRs. Add `Bash(gh *)` to `allow`, or use `--no-merge`. |
+| `guard: PR ... is not verified for merge` | Working as intended: `verify-batch.sh <batch> pre-merge` must print READY first. |
+| Hooks do nothing | The skill is not at `~/.claude/skills/backlog-loop` or `<project>/.claude/skills/backlog-loop`. Set `BACKLOG_LOOP_HOME`. Check with `/hooks`. |
+| `Backlog loop halted: base branch was red ...` | A merge broke the base branch and was reverted. Its items are blocked with the reason. `/backlog-loop --resume` continues with the remaining batches. |
+| `halted: remaining batches depend on pull requests that wait for a human merge` | `--no-merge`: merge the listed PRs, then `/backlog-loop --resume`. |
+| Preflight or the post-merge check is cut off | The suite takes longer than the Bash tool allows. Raise `BASH_MAX_TIMEOUT_MS`, and `baseline-minutes` if it exceeds 30 minutes. |
+| State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active. |
+
+## Tests
+
+```bash
+tests/run.sh            # everything, about two minutes
+tests/run.sh --quick    # unit suites only
+tests/dry-run.sh github # the full loop on a fixture repository, no network
+tests/dry-run.sh file
+```
+
+The dry run sets `BACKLOG_LOOP_DRY_RUN=1`, which puts stub `gh` and `git`
+(push, fetch, pull) from `tests/stubs/` first on `PATH`. It drives a five-item
+backlog through planning, batches, a CI failure with a fix, an unclear item
+with a decision record, a hard blocker, and the final report.
+
+`NOTES.md` lists where this skill deviates from its original specification and
+why.

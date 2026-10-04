@@ -208,6 +208,8 @@ case "$C_CI" in required | none) ;; *) config_errors="$config_errors ci must be 
 [ -n "$C_BUILD" ] || config_errors="$config_errors build command could not be detected (set it, or 'none');"
 [ "$C_TEST" != "none" ] || config_errors="$config_errors test must be a real command;"
 
+config_errors="${config_errors# }"
+
 if [ "$PROBES" -eq 1 ]; then
   # One harmless command per class. Claude runs each as its own Bash call, so
   # a missing permission shows up now and not hours into an unattended run.
@@ -411,7 +413,7 @@ if [ "$C_SOURCE" = "github" ]; then
 elif [ "$C_SOURCE" = "file" ]; then
   if [ ! -f "$C_PATH" ]; then
     fail "Issues" "backlog file $C_PATH does not exist" "create it, or set path in the Backlog loop section"
-  elif [ -z "$(awk -v mode=list -f "$BL_SCRIPT_DIR/backlog.awk" "$C_PATH" | grep -v 'blocked$')" ]; then
+  elif ! awk -v mode=list -f "$BL_SCRIPT_DIR/backlog.awk" "$C_PATH" | grep -qv 'blocked$'; then
     fail "Issues" "$C_PATH has no open items" "add items as table rows (ID, Title, Status) or as '- [ ] ID: title' lines"
   else
     pass

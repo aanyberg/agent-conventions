@@ -1,0 +1,5 @@
+# Follow `. lib.sh` and `. helpers.sh` next to the script being checked.
+external-sources=true
+source-path=SCRIPTDIR
+# jq filters are written in single quotes on purpose; $vars in them are jq's.
+disable=SC2016

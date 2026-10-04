@@ -26,7 +26,7 @@ st gate abc 1 2 auto
 assert_eq "hash ignores iteration and gate bookkeeping" "$before" "$(st hash)"
 assert_eq "gate bookkeeping is stored" "abc/1/2/auto" "$(sget '"\(.run.last_hash)/\(.run.unchanged_gates)/\(.run.gate_blocks)/\(.run.permission_mode)"')"
 st record worker-started 1 >/dev/null
-[ "$before" != "$(st hash)" ] && ok "hash changes with a transition" || not_ok "hash changes with a transition"
+assert_eq "hash changes with a transition" "changed" "$([ "$before" != "$(st hash)" ] && echo changed)"
 assert_empty "atomic writes leave no temp files" "$(find "$STATE_DIR" -name '*.tmp*')"
 assert_eq "state stays valid JSON" "0" "$(jq -e . "$STATE" >/dev/null 2>&1; echo $?)"
 out="$(st record worker-started 99 2>&1)"
@@ -177,11 +177,21 @@ assert_contains "the halt reason is urgent" "URGENT" "$(sget '.run.halt_reason')
 
 echo "state.sh: lock and resume"
 use_state base.json
-( . "$S/lib.sh"; bl_paths; bl_lock_acquire one ) && ok "first session takes the lock" || not_ok "first session takes the lock"
-( . "$S/lib.sh"; bl_paths; bl_lock_acquire one ) && ok "the same session may re-acquire" || not_ok "the same session may re-acquire"
-( . "$S/lib.sh"; bl_paths; bl_lock_acquire two ) && not_ok "a second session is refused" || ok "a second session is refused"
+# acquire <session>: prints the exit status of bl_lock_acquire.
+acquire() {
+  (
+    # shellcheck source=../scripts/lib.sh
+    . "$S/lib.sh"
+    bl_paths
+    bl_lock_acquire "$1"
+    echo $?
+  )
+}
+assert_eq "first session takes the lock" "0" "$(acquire one)"
+assert_eq "the same session may re-acquire" "0" "$(acquire one)"
+assert_eq "a second session is refused" "1" "$(acquire two)"
 touch -t 202001010000 "$STATE_DIR/lock"
-( . "$S/lib.sh"; bl_paths; bl_lock_acquire two ) && ok "a stale lock is taken over" || not_ok "a stale lock is taken over"
+assert_eq "a stale lock is taken over" "0" "$(acquire two)"
 assert_eq "the lock names its owner" "two" "$(sed -n 1p "$STATE_DIR/lock")"
 use_state base.json "$DEFS inprog(1; \"working\") | .batches[0].pr = null | .run.status = \"halted\" | .run.halt_reason = \"iteration limit\" | .run.iterations = 100"
 st resume --session three >/dev/null

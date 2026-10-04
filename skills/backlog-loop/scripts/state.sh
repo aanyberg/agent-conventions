@@ -31,7 +31,7 @@ def new_batch($id; $theme; $items; $deps; $order): {
   pr: null, revert_pr: null, head_sha: null, premerge_sha: null, merge_commit: null,
   ci_reruns: 0, ci_polls: 0, ci_started_at: null, worker_started_at: null,
   fixes: 0, failures: 0, conflict_attempts: 0, requeues: 0, merge_tries: 0,
-  removed: [], last_error: null };
+  removed: [], retry_of: null, last_error: null };
 # Count a failed attempt for every live item of a batch. Items that run out of
 # attempts are blocked directly ($drop == false) or dropped from the branch
 # first. When no item is left to continue with, the batch goes to "blocking".
@@ -334,6 +334,8 @@ section() {
     $0 == "<!-- BEGIN " name " -->" { on = 1 }' "$1"
 }
 
+# The BL_T_* variables are read by render() through indirect expansion.
+# shellcheck disable=SC2034
 cmd_worker_prompt() {
   local b="$1" mode="implement" item="" tmpl out done_ids
   shift
@@ -360,8 +362,8 @@ cmd_worker_prompt() {
   BL_T_BACKLOG_FILE="$(bl_cfg path)"
   done_ids="[]"
   if [ "$mode" = "continue" ]; then done_ids="$(trailer_ids "$b" Backlog-Item | ids_json)"; fi
-  BL_T_ITEMS="$(jq -r --argjson b "$b" --arg src "$(bl_cfg source)" --argjson done "$done_ids" "$JQ_DEFS"'
-    batch_items($b)[] | select(.pending == null and .research != "pending" and (has_id($done; .id) | not))
+  BL_T_ITEMS="$(jq -r --argjson b "$b" --arg src "$(bl_cfg source)" --argjson committed "$done_ids" "$JQ_DEFS"'
+    batch_items($b)[] | select(.pending == null and .research != "pending" and (has_id($committed; .id) | not))
     | "- id \(.id): \(.title)"
       + (if $src == "github" then " (read it with: gh issue view \(.id))" else "" end)
       + (if .decision then " [decision record below]" else "" end)
@@ -387,6 +389,7 @@ cmd_worker_prompt() {
   cat "$out"
 }
 
+# shellcheck disable=SC2034
 cmd_research_prompt() {
   local item="$1" tmpl
   need_state
@@ -559,16 +562,16 @@ record_worker_done() {
     return 0
   fi
   done_ids="$(trailer_ids "$b" Backlog-Item | ids_json)"
-  upd --argjson b "$b" --argjson done "$done_ids" --arg sha "$sha" \
+  upd --argjson b "$b" --argjson committed "$done_ids" --arg sha "$sha" \
     --argjson max "$(max_attempts)" "$JQ_DEFS"'
     set_items($b;
-      if .pending != null or .research == "pending" or has_id($done; .id) then .
+      if .pending != null or .research == "pending" or has_id($committed; .id) then .
       else .attempts += 1 | .last_error = "no commit with trailer Backlog-Item: \(.id) on the branch"
         | (if .attempts >= $max then .pending = "block" else . end)
       end)
     | (batch_items($b)) as $act
-    | ([$act[] | select(.pending == null and (has_id($done; .id) | not))] | length) as $open
-    | ([$act[] | select(.pending == null and has_id($done; .id))] | length) as $ready
+    | ([$act[] | select(.pending == null and (has_id($committed; .id) | not))] | length) as $open
+    | ([$act[] | select(.pending == null and has_id($committed; .id))] | length) as $ready
     | set_batch($b; .pushed = true | .head_sha = $sha | .worker_started_at = null
         | .phase = (if $open == 0 and $ready > 0 then "open-pr"
                     elif $open == 0 and $ready == 0 then "blocking"
@@ -587,16 +590,16 @@ record_worker_failed() {
   require_phase "$b" working
   fetch_ref "$(bq "$b" '.branch')"
   done_ids="$(trailer_ids "$b" Backlog-Item | ids_json)"
-  upd --argjson b "$b" --argjson done "$done_ids" --arg msg "$reason" \
+  upd --argjson b "$b" --argjson committed "$done_ids" --arg msg "$reason" \
     --argjson max "$(max_attempts)" "$JQ_DEFS"'
     set_items($b;
-      if .pending != null or .research == "pending" or has_id($done; .id) then .
+      if .pending != null or .research == "pending" or has_id($committed; .id) then .
       else .attempts += 1 | .last_error = $msg
         | (if .attempts >= $max then .pending = "block" else . end)
       end)
     | ([batch_items($b)[] | select(.pending == null)] | length) as $left
     | set_batch($b; .worker_started_at = null | .last_error = $msg
-        | .pushed = (.pushed or ($done | length) > 0)
+        | .pushed = (.pushed or ($committed | length) > 0)
         | .phase = (if $left == 0 then "blocking" else "implement" end))'
   bl_log "worker-failed batch=$b reason=$reason"
   printf 'Batch %s: worker failure recorded, phase %s.\n' "$b" "$(bq "$b" '.phase')"
@@ -785,7 +788,7 @@ record_item_dropped() {
         set_item($i; .batch = null | .pending = "block")
       else
         set_item($i; .batch = $nid | .pending = null | .status = "todo")
-        | .batches += [new_batch($nid; "Retry of \($i): \($it.title)"; [$i]; []; $last)]
+        | .batches += [new_batch($nid; "Retry of \($i): \($it.title)"; [$i]; []; $last) | .retry_of = $b]
         | .batches |= map(if (.depends_on | index($b)) != null and .id != $nid then .depends_on += [$nid] else . end)
       end'
   settle_batch "$b"
@@ -1125,13 +1128,13 @@ cmd_sync_backlog() {
     printf 'Nothing to update in %s.\n' "$path"
     return 0
   fi
-  git -C "$wt" add "$path" &&
+  if ! { git -C "$wt" add "$path" &&
     git -C "$wt" commit -q -m "chore(backlog): update item status after backlog-loop run" &&
-    git -C "$wt" push -q origin "$branch" || {
+    git -C "$wt" push -q origin "$branch"; }; then
     git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
     upd '.run.sync = "failed"'
     bl_die "could not commit and push the backlog status branch"
-  }
+  fi
   sha="$(git -C "$wt" rev-parse HEAD)"
   git -C "$BL_ROOT" worktree remove --force "$wt" >/dev/null 2>&1 || true
   git -C "$BL_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
@@ -1175,7 +1178,7 @@ cmd_housekeeping() {
     record_worker_failed "$b" --reason "worker exceeded the ${wait_min:-120}-minute deadline" >/dev/null
   done
   upd "$JQ_DEFS"'
-    [.batches[] | select(.status == "blocked") | .id] as $dead
+    [.batches[] | select(.status == "blocked" and .retry_of == null) | .id] as $dead
     | [.batches[] | select(.status == "todo") | select(any(.depends_on[]; . as $d | any($dead[]; . == $d))) | .id] as $stuck
     | .items |= map(if (.batch as $b | any($stuck[]; . == $b)) and live and .pending == null
         then .pending = "block" | .last_error = "depends on batch that is blocked" else . end)

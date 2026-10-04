@@ -138,7 +138,7 @@ check_state_access() {
 }
 
 check_segment() {
-  local seg="$1" first w i n
+  local seg="$1" first w n
   # Drop leading assignments and wrappers.
   set -f
   # shellcheck disable=SC2086

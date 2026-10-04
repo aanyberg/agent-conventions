@@ -131,7 +131,8 @@ fi
 decision="$(jq -r '
   def first_batch(f): [.batches | sort_by(.order)[] | select(f)] | first;
   . as $s
-  | [.batches[] | select(.status == "merged" or .status == "closed") | .id] as $ok
+  | [.batches[] | select(.status == "merged" or .status == "closed"
+      or (.status == "blocked" and .retry_of != null)) | .id] as $ok
   | ([.batches[] | select(.phase == "working")] | length) as $running
   | (.config.limits.parallel_batches // 2) as $par
   | [.batches | sort_by(.order)[] | select(.status == "todo")

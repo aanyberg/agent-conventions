@@ -89,6 +89,9 @@ guarded, because jq 1.6 exits 0 there.
 - The lock holds the session id. Its mtime is the heartbeat, refreshed by
   `next.sh`, `ci-wait.sh`, `state.sh record` and the guard hook. Another
   session may take it over after 15 minutes without a heartbeat.
+- When a run is done its branches, worktrees, `run.log` and working files are
+  removed; state, plan, report and decision records stay. A halted or stalled
+  run keeps everything.
 - A finished run is moved to `archive/<run id>/` when the next run starts.
 - Branch names: `backlog-loop/<run id>/b<batch>-t<tries>`. A re-queued or
   reset batch gets a new branch.

@@ -243,6 +243,13 @@ assert_eq "item 2 is blocked after three attempts, the rest is merged" "1,3,4,5/
   "$(jq -r '[.items[] | select(.status == "merged") | .id] | join(",")' "$STATE")/$(jq -r '[.items[] | select(.status == "blocked") | .id] | join(",")' "$STATE")/$(iq 2 '.attempts')"
 assert_eq "a blocked retry does not block the batches that depended on the original" "merged" "$(bq 3 '.status')"
 assert_eq "the retry batch ends blocked and its PR is closed" "blocked/CLOSED" "$(bq 4 '.status')/$(jq -r '.prs[] | select(.head | test("b4-")) | .state' "$GH")"
+assert_eq "the blocked batch's branch is removed from the remote when the run is done" "" \
+  "$(git for-each-ref --format='%(refname:short)' 'refs/remotes/origin/backlog-loop/*' | tr '\n' ' ')"
+git branch -q worktree-agent-stray origin/main
+git commit -q --allow-empty -m "unmerged work" && git branch -q worktree-agent-keep && git reset -q --hard origin/main
+"$S/state.sh" record run done "" 2>/dev/null
+assert_eq "merged-in worker worktree branches are removed, ones with own commits are kept" "worktree-agent-keep" \
+  "$(git for-each-ref --format='%(refname:short)' 'refs/heads/worktree-*' | tr '\n' ' ' | sed 's/ $//')"
 case "$(git ls-tree -r --name-only origin/main | tr '\n' ' ')" in
   *feature-2.txt* | *.ci-fail*) not_ok "nothing of item 2 reached the base branch" ;;
   *) ok "nothing of item 2 reached the base branch" ;;

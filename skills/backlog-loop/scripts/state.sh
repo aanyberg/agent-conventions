@@ -995,9 +995,44 @@ record_blocked() {
   bl_log "blocked item=$i why=$why"
 }
 
+# When a run is done: remove what blocked and closed batches left behind.
+# Green pull requests that wait for the user (--no-merge) keep their branches.
+final_cleanup() {
+  local b branch base
+  base="$(bl_cfg base_branch)"
+  bl_get '.batches[] | select(.status == "blocked" or .status == "closed") | .id' | while IFS= read -r b; do
+    cmd_cleanup "$b"
+    bq "$b" '(.branch // empty), .old_branches[]?' | while IFS= read -r branch; do
+      if [ -n "$branch" ] && [ -n "$(remote_sha "$branch")" ]; then
+        git -C "$BL_ROOT" push -q origin --delete "$branch" >/dev/null 2>&1 || true
+      fi
+    done
+  done
+  # Branches Claude Code made for worker worktrees: only those that are no
+  # longer checked out anywhere and hold no commit that is not on the base.
+  git -C "$BL_ROOT" worktree prune >/dev/null 2>&1 || true
+  git -C "$BL_ROOT" for-each-ref --format='%(refname:short)' 'refs/heads/worktree-*' 2>/dev/null | while IFS= read -r branch; do
+    if ! git -C "$BL_ROOT" worktree list --porcelain | grep -qxF "branch refs/heads/$branch" &&
+      git -C "$BL_ROOT" merge-base --is-ancestor "$branch" "origin/$base" 2>/dev/null; then
+      git -C "$BL_ROOT" branch -D "$branch" >/dev/null 2>&1 || true
+    fi
+  done
+  bl_log "final cleanup done"
+}
+
+# Working files of a finished run. state.json, plan.md, report.md and the
+# decision records stay: they are the record of what happened.
+cmd_purge_logs() {
+  need_state
+  [ "$(bl_get '.run.status')" = "done" ] || return 0
+  rm -rf "$BL_DIR/run.log" "$BL_DIR/prompts" "$BL_DIR/pr-body.md" "$BL_DIR/plan.json" \
+    "$BL_DIR/sync-edits.tsv" "$BL_DIR/checks.out" "$BL_DIR"/gate.out.* "$BL_DIR"/state.json.tmp.*
+}
+
 record_run() {
   local status="$1" reason="${2:-}"
   case "$status" in halted | stalled | done) ;; *) bl_die "unknown run status: $status" ;; esac
+  if [ "$status" = "done" ]; then final_cleanup; fi
   upd --arg s "$status" --arg r "$reason" '.run.status = $s | .run.halt_reason = (if $r == "" then null else $r end)'
   bl_lock_release
   bl_log "run status=$status $reason"
@@ -1228,6 +1263,7 @@ case "$cmd" in
   open-pr) cmd_open_pr "$@" ;;
   housekeeping) cmd_housekeeping ;;
   tick) cmd_tick ;;
+  purge-logs) cmd_purge_logs ;;
   gate) cmd_gate "$@" ;;
   archive) cmd_archive ;;
   unlock) bl_lock_release ;;

@@ -208,13 +208,20 @@ Retries: batch 1 (1 fix), batch 2 (1 CI rerun)
 Report:  .planning/backlog-loop/report.md
 ```
 
+When a run reaches `done`, the scripts clean up: branches and worktrees of
+blocked and closed batches are removed (merged ones already were), leftover
+`worktree-*` branches without commits of their own are deleted, and `run.log`,
+`prompts/` and the other working files are removed. `state.json`, `plan.md`,
+`report.md` and `decisions/` stay as the record. A halted or stalled run keeps
+everything, so it can be resumed and diagnosed.
+
 Files in `.planning/backlog-loop/` (ignored by git):
 
 | File | Content |
 |---|---|
 | `state.json` | The run. Written only by `scripts/state.sh`. |
 | `plan.md` | The batches, human readable. |
-| `run.log` | Every action, decision and script result, with timestamps. |
+| `run.log` | Every action, decision and script result, with timestamps. Removed when the run is done. |
 | `report.md` | The summary above, plus one line per batch. |
 | `decisions/<item>.md` | Decision record for each unclear item. |
 | `lock` | Session that owns the run. |

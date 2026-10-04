@@ -77,8 +77,8 @@ assert_eq "status is stalled" "stalled" "$(sget '.run.status')"
 assert_contains "the stall is explained" "stalled" "$(printf '%s' "$OUT" | jq -r '.systemMessage')"
 use_state base.json
 gate
-"$S/state.sh" record worker-started 1 >/dev/null
-"$S/state.sh" record worker-failed 1 --reason x >/dev/null
+"$S/state.sh" record item-started 1 >/dev/null
+"$S/state.sh" record item-failed 1 --reason x >/dev/null
 gate '{"stop_hook_active": true}'
 assert_eq "progress between checks resets the counter" "block/0" "$(decision)/$(sget '.run.unchanged_gates')"
 
@@ -111,8 +111,8 @@ gate
 assert_eq "exit status is 0 when blocking" "0" "$RC"
 assert_eq "decision is block" "block" "$(decision)"
 reason="$(printf '%s' "$OUT" | jq -r '.reason')"
-assert_contains "reason carries the next.sh action" '"action": "implement_batch"' "$reason"
-assert_contains "reason carries concrete commands" "state.sh record worker-started 1" "$reason"
+assert_contains "reason carries the next.sh action" '"action": "implement_items"' "$reason"
+assert_contains "reason carries concrete commands" "state.sh record item-started 1" "$reason"
 assert_eq "the gate call counts as an iteration" "1" "$(sget '.run.total_iterations')"
 assert_eq "permission mode is recorded" "auto" "$(sget '.run.permission_mode')"
 
@@ -132,10 +132,10 @@ assert_eq "waiting for a fix worker is not a stall" "running/0" "$(sget '"\(.run
 use_state base.json
 export CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=3
 gate
-"$S/state.sh" record worker-started 1 >/dev/null
+"$S/state.sh" record item-started 1 >/dev/null
 gate '{"stop_hook_active": true}'
 assert_eq "second consecutive block is below the cap" "block/2" "$(decision)/$(sget '.run.gate_blocks')"
-"$S/state.sh" record worker-failed 1 --reason x >/dev/null
+"$S/state.sh" record item-failed 1 --reason x >/dev/null
 gate '{"stop_hook_active": true}'
 assert_eq "the block that would hit the cap is not issued" "allow" "$(decision)"
 assert_eq "the run stays resumable" "running" "$(sget '.run.status')"

@@ -150,7 +150,12 @@ for tier in $BL_TIERS; do
   case "$m" in "" | haiku | sonnet | opus | fable | inherit) ;;
     *) config_errors="$config_errors model-$tier must be haiku, sonnet, opus, fable or inherit, not '$m';" ;;
   esac
+  a="$(cfg_raw "agent-$tier")"
+  case "$a" in *[!A-Za-z0-9_:.-]*) config_errors="$config_errors agent-$tier must be a subagent name, not '$a';" ;; esac
 done
+C_COMMITS="$(cfg_raw batch-commits)"
+[ -n "$C_COMMITS" ] || C_COMMITS="per-item"
+case "$C_COMMITS" in per-item | squashed) ;; *) config_errors="$config_errors batch-commits must be per-item or squashed, not '$C_COMMITS';" ;; esac
 
 config_errors="${config_errors# }"
 
@@ -169,12 +174,27 @@ if bl_state_ok; then
   case "$(bl_get '.run.status')" in running | halted | stalled) UNFINISHED=1 ;; esac
 fi
 
-if [ "$UNFINISHED" -eq 1 ]; then
+if [ "$UNFINISHED" -eq 1 ] && [ "$(bl_get '.version')" != "2" ]; then
+  fail "Filesystem" "the unfinished run was started by an older backlog-loop (state version $(bl_get '.version')); this version runs items in parallel and cannot resume it" \
+    "finish it with the previous version, or move $BL_DIR away to start a new run"
+elif [ "$UNFINISHED" -eq 1 ]; then
   pass
 elif [ -n "$config_errors" ]; then
   fail "Config" "${config_errors%;}" "add this section to CLAUDE.md and fill it in:${NL}${NL}${CONFIG_SECTION}${NL}"
 else
   pass
+fi
+
+# A project agent is looked up where Claude Code reads agent files. Plugin
+# agents live elsewhere, so a miss is a warning, not a failure.
+if [ "$UNFINISHED" -eq 0 ]; then
+  for tier in $BL_TIERS; do
+    a="$(cfg_raw "agent-$tier")"
+    [ -n "$a" ] || continue
+    if [ ! -f "$BL_ROOT/.claude/agents/$a.md" ] && [ ! -f "$HOME/.claude/agents/$a.md" ]; then
+      warn "Agents" "agent-$tier names '$a', but no $a.md is in .claude/agents or ~/.claude/agents"
+    fi
+  done
 fi
 
 if [ "$RESUME" -eq 1 ] && [ "$UNFINISHED" -eq 0 ]; then
@@ -493,19 +513,23 @@ jq -n --arg source "$C_SOURCE" --arg lbl "$C_LABEL" --arg path "$C_PATH" --arg b
   --arg repo "$REPO" --arg method "$C_METHOD" --argjson web "$RESEARCH_WEB" \
   --argjson max_attempts "$(limit max-attempts 3)" --argjson ci_reruns "$(limit ci-reruns 1)" \
   --argjson ci_wait "$(limit ci-wait-minutes 45)" --argjson research "$(limit research-passes 1)" \
-  --argjson parallel "$(limit parallel-batches 4)" --argjson stall "$(limit stall-threshold 2)" \
+  --argjson parallel "$(limit parallel-items 5)" --argjson stall "$(limit stall-threshold 2)" \
   --argjson iterations "$(limit max-iterations 100)" --argjson hours "$(limit max-hours 12)" \
   --argjson worker "$(limit worker-wait-minutes 120)" \
   --argjson batch_items "$(limit max-batch-items 15)" \
   --arg m_light "$(cfg_raw model-light)" --arg m_standard "$(cfg_raw model-standard)" \
-  --arg m_complex "$(cfg_raw model-complex)" '
+  --arg m_complex "$(cfg_raw model-complex)" --arg commits "$C_COMMITS" \
+  --arg a_light "$(cfg_raw agent-light)" --arg a_standard "$(cfg_raw agent-standard)" \
+  --arg a_complex "$(cfg_raw agent-complex)" '
   { source: $source, "label": $lbl, path: $path, base_branch: $base, repo: $repo,
     merge_method: $method, research_web: $web,
     models: { light: ($m_light | if . == "" then "haiku" else . end),
               standard: ($m_standard | if . == "" then "sonnet" else . end),
               complex: ($m_complex | if . == "" then "opus" else . end) },
+    agents: ({ light: $a_light, standard: $a_standard, complex: $a_complex } | with_entries(select(.value != ""))),
+    batch_commits: $commits,
     limits: { max_attempts: $max_attempts, ci_reruns: $ci_reruns, ci_wait_minutes: $ci_wait,
-              research_passes: $research, parallel_batches: $parallel, stall_threshold: $stall,
+              research_passes: $research, parallel_items: $parallel, stall_threshold: $stall,
               max_iterations: $iterations, max_hours: $hours, worker_wait_minutes: $worker,
               max_batch_items: $batch_items } }' >"$BL_CONFIG.tmp" &&
   mv -f "$BL_CONFIG.tmp" "$BL_CONFIG"

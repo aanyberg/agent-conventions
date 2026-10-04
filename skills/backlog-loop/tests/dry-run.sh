@@ -60,36 +60,33 @@ worker() {
 bq() { jq -r --argjson b "$1" ".batches[] | select(.id == \$b) | $2" "$STATE"; }
 iq() { jq -r --arg i "$1" ".items[] | select(.id == \$i) | $2" "$STATE"; }
 
+# implement <batch> <item>: one item worker. It commits locally and does not push.
 implement() {
-  local b="$1" branch prompt ids id snippet=""
-  branch="$("$S/state.sh" record worker-started "$b")" || return 1
-  prompt="$("$S/state.sh" worker-prompt "$b")"
-  assert_contains "batch $b: worker prompt names the branch" "$branch" "$prompt"
-  assert_contains "batch $b: worker prompt asks for the item trailer" "Backlog-Item:" "$prompt"
-  ids="$(jq -r --argjson b "$b" '.items[] | select(.batch == $b and .pending == null and .research != "pending"
-    and (.status == "todo" or .status == "in-progress")) | .id' "$STATE")"
-  for id in $ids; do
-    case "$id" in
-      4)
-        if [ "$(iq 4 '.research')" = "none" ]; then
-          "$S/state.sh" record unclear 4 --question "ISO 8601 or locale format for dates?" >/dev/null
-          continue
-        fi
-        assert_contains "item 4: worker prompt carries the decision record" "Decision for item 4" "$prompt"
-        ;;
-      5)
-        "$S/state.sh" record hard-blocker 5 --reason "needs production billing API credentials" >/dev/null
-        continue
-        ;;
-    esac
-    snippet="$snippet echo 'feature $id' > feature-$id.txt;"
-    [ "$id" != "3" ] || snippet="$snippet touch .ci-fail;"
-    snippet="$snippet git add -A; git commit -q -m 'feat: item $id' -m 'Backlog-Item: $id';"
-  done
-  if [ -n "$snippet" ]; then
-    worker "$branch" "origin/main" "$snippet git push -q origin $branch" || return 1
-  fi
-  "$S/state.sh" record worker-done "$b" >/dev/null
+  local b="$1" id="$2" branch prompt snippet
+  branch="$("$S/state.sh" record item-started "$id")" || return 1
+  prompt="$("$S/state.sh" worker-prompt "$b" --mode item --item "$id")"
+  assert_contains "item $id: worker prompt names the item branch" "$branch" "$prompt"
+  assert_contains "item $id: worker prompt asks for the item trailer" "Backlog-Item: $id" "$prompt"
+  assert_contains "item $id: worker prompt says not to push" "Do not push" "$prompt"
+  case "$id" in
+    4)
+      if [ "$(iq 4 '.research')" = "none" ]; then
+        "$S/state.sh" record unclear 4 --question "ISO 8601 or locale format for dates?" >/dev/null
+        "$S/state.sh" record item-done 4 >/dev/null
+        return 0
+      fi
+      assert_contains "item 4: worker prompt carries the decision record" "Decision for item 4" "$prompt"
+      ;;
+    5)
+      "$S/state.sh" record hard-blocker 5 --reason "needs production billing API credentials" >/dev/null
+      "$S/state.sh" record item-done 5 >/dev/null
+      return 0
+      ;;
+  esac
+  snippet="echo 'feature $id' > feature-$id.txt;"
+  [ "$id" != "3" ] || snippet="$snippet touch .ci-fail;"
+  worker "$branch" "origin/main" "$snippet git add -A; git commit -q -m 'feat: item $id' -m 'Backlog-Item: $id'" || return 1
+  "$S/state.sh" record item-done "$id" >/dev/null
 }
 
 # Run the Stop hook as Claude Code would.
@@ -128,21 +125,27 @@ while [ "$steps" -lt 150 ]; do
 {"batches": [
   {"theme": "Greeting", "title": "feat: greeting", "rationale": "Feature and its tests belong together.", "items": ["1", "2"]},
   {"theme": "Farewell", "title": "feat: farewell", "items": ["3"]},
-  {"theme": "Dates and billing", "title": "feat: dates and billing", "items": ["4", "5"], "depends_on": [1]}
+  {"theme": "Dates and billing", "title": "feat: dates and billing", "tier": "complex", "items": [{"id": "4", "needs": ["1"]}, "5"]}
 ]}
 EOP
       "$S/state.sh" plan-apply "$DIR/plan.json" >/dev/null || { not_ok "plan is accepted"; break; }
       assert_contains "plan.md lists the batches" "## Batch 3: Dates and billing" "$(cat "$DIR/plan.md")"
+      assert_contains "plan.md names each item's model and needs" "Pick a date format (opus, needs" "$(cat "$DIR/plan.md")"
       # Claude tries to stop right after planning: the gate must send it back to work.
       g="$(gate)"
       assert_eq "stop gate blocks while work remains" "block" "$(printf '%s' "$g" | jq -r '.decision')"
-      assert_contains "stop gate hands over the next action" "implement_batch" "$g"
+      assert_contains "stop gate hands over the next action" "implement_items" "$g"
       ;;
 
-    implement_batch)
-      for b in $(printf '%s' "$out" | jq -r '.batches[]'); do
-        implement "$b" || { not_ok "worker for batch $b"; break 2; }
+    implement_items)
+      for id in $(printf '%s' "$out" | jq -r '.items[]'); do
+        implement "$target" "$id" || { not_ok "worker for item $id"; break 2; }
       done
+      ;;
+
+    integrate)
+      "$S/state.sh" integrate "$target" >/dev/null || { not_ok "integrate batch $target"; break; }
+      assert_eq "batch $target: nothing is pushed before the PR" "" "$(git rev-parse -q --verify "refs/remotes/origin/$(bq "$target" '.branch')" || true)"
       ;;
 
     research)
@@ -192,6 +195,13 @@ EOD
       ;;
 
     wait_ci)
+      # Someone else merges an unrelated change while batch 2 waits for CI,
+      # so the batch has to be updated from the base before it merges.
+      if [ "$target" = "2" ] && [ -z "${HUMAN_PUSHED:-}" ]; then
+        HUMAN_PUSHED=1
+        worker human origin/main "echo 'docs' > HUMAN.md; git add -A; git commit -q -m 'docs: human change'" &&
+          git update-ref refs/remotes/origin/main refs/heads/human
+      fi
       "$S/ci-wait.sh" "$target" >/dev/null || { not_ok "ci-wait.sh"; break; }
       ;;
 
@@ -258,7 +268,7 @@ assert_eq "decision record exists" "yes" "$([ -s "$DIR/decisions/4.md" ] && echo
 assert_eq "batch 2 took one fix" "1" "$(bq 2 '.fixes')"
 assert_eq "batch 2 took one CI rerun" "1" "$(bq 2 '.ci_reruns')"
 assert_eq "the lock is released" "no" "$([ -e "$DIR/lock" ] && echo yes || echo no)"
-for step in plan implement_batch research mark_blocked open_pr wait_ci rerun_ci fix_ci merge rebase_batch verify; do
+for step in plan implement_items integrate research mark_blocked open_pr wait_ci rerun_ci fix_ci merge rebase_batch verify; do
   case "$seen" in *" $step "*) ok "action $step was exercised" ;; *) not_ok "action $step was exercised" "seen:$seen" ;; esac
 done
 

@@ -25,12 +25,12 @@ st tick
 st gate abc 1 2 auto
 assert_eq "hash ignores iteration and gate bookkeeping" "$before" "$(st hash)"
 assert_eq "gate bookkeeping is stored" "abc/1/2/auto" "$(sget '"\(.run.last_hash)/\(.run.unchanged_gates)/\(.run.gate_blocks)/\(.run.permission_mode)"')"
-st record worker-started 1 >/dev/null
+st record item-started 1 >/dev/null
 assert_eq "hash changes with a transition" "changed" "$([ "$before" != "$(st hash)" ] && echo changed)"
 assert_empty "atomic writes leave no temp files" "$(find "$STATE_DIR" -name '*.tmp*')"
 assert_eq "state stays valid JSON" "0" "$(jq -e . "$STATE" >/dev/null 2>&1; echo $?)"
-out="$(st record worker-started 99 2>&1)"
-assert_contains "unknown batch is rejected" "unknown batch" "$out"
+out="$(st record item-started 99 2>&1)"
+assert_contains "unknown item is rejected" "unknown item" "$out"
 out="$(st record fix-pushed 2 2>&1)"
 assert_contains "a transition from the wrong phase is rejected" "expected: fix" "$out"
 
@@ -38,7 +38,7 @@ echo "state.sh: plan-apply"
 plan() { printf '%s' "$1" >"$STATE_DIR/plan.json"; st plan-apply "$STATE_DIR/plan.json" 2>&1; }
 fresh='.batches = [] | .items |= map(.batch = null)'
 use_state base.json "$fresh"
-out="$(plan '{"batches":[{"theme":"A","items":["1","2"]},{"theme":"B","items":["3","4","5"],"depends_on":[1]}],"unclear":[{"id":"4","question":"which?"}]}')"
+out="$(plan '{"batches":[{"theme":"A","items":["1","2"]},{"theme":"B","items":["3","4","5"]}],"unclear":[{"id":"4","question":"which?"}]}')"
 assert_contains "valid plan is applied" "Plan applied: 2 batches" "$out"
 assert_eq "items point at their batch" "1,1,2,2,2" "$(sget '[.items[].batch | tostring] | join(",")')"
 assert_eq "unclear items are queued for research" "pending" "$(sget '.items[] | select(.id == "4") | .research')"
@@ -58,7 +58,10 @@ use_state base.json "$fresh"
 assert_contains "plan missing an item is rejected" "item 5 is in 0 batches" "$(plan '{"batches":[{"theme":"A","items":["1","2","3","4"]}]}')"
 assert_contains "plan with an item twice is rejected" "item 1 is in 2 batches" "$(plan '{"batches":[{"theme":"A","items":["1","2","3","4","5"]},{"theme":"B","items":["1"]}]}')"
 assert_contains "plan with an unknown item is rejected" "item 9 is not an open backlog item" "$(plan '{"batches":[{"theme":"A","items":["1","2","3","4","5","9"]}]}')"
-assert_contains "plan depending on a later batch is rejected" "may only depend on earlier batches" "$(plan '{"batches":[{"theme":"A","items":["1","2"],"depends_on":[2]},{"theme":"B","items":["3","4","5"]}]}')"
+assert_contains "batch depends_on is rejected" "batch 2 uses depends_on; put needs on its items instead" "$(plan '{"batches":[{"theme":"A","items":["1","2"]},{"theme":"B","items":["3","4","5"],"depends_on":[1]}]}')"
+assert_contains "needs on an item in the same batch is rejected" "item 2 needs 1, which is not in an earlier batch" "$(plan '{"batches":[{"theme":"A","items":["1",{"id":"2","needs":["1"]},"3","4","5"]}]}')"
+assert_contains "needs on an item in a later batch is rejected" "item 1 needs 3, which is not in an earlier batch" "$(plan '{"batches":[{"theme":"A","items":[{"id":"1","needs":["3"]},"2"]},{"theme":"B","items":["3","4","5"]}]}')"
+assert_contains "an item with an unknown tier is rejected" "item 2 has tier 'huge'; use light, standard or complex" "$(plan '{"batches":[{"theme":"A","items":["1",{"id":"2","tier":"huge"},"3","4","5"]}]}')"
 assert_contains "plan with an empty batch is rejected" "batch 2 has no items" "$(plan '{"batches":[{"theme":"A","items":["1","2","3","4","5"]},{"theme":"B","items":[]}]}')"
 assert_contains "plan without a theme is rejected" "batch 1 has no theme" "$(plan '{"batches":[{"items":["1","2","3","4","5"]}]}')"
 use_state base.json "$fresh | .config.limits.max_batch_items = 2"
@@ -70,18 +73,43 @@ assert_eq "--plan-only halts after planning" "halted/plan-only" "$(sget '"\(.run
 use_state base.json "$DEFS inprog(1; \"ci\")"
 assert_contains "the plan cannot be replaced once batches are in flight" "already in flight" "$(plan '{"batches":[{"theme":"A","items":["1"]}]}')"
 
-echo "state.sh: workers and attempts"
+echo "state.sh: plan items with tier and needs"
+use_state base.json "$fresh"
+plan '{"batches":[{"theme":"A","items":["1",{"id":"2","tier":"light"}]},{"theme":"B","tier":"complex","items":["3",{"id":4,"needs":["1"]},"5"]}]}' >/dev/null
+assert_eq "item tier and needs are stored" "light/1" "$(sget '.items[] | select(.id == "2") | .tier')/$(sget '.items[] | select(.id == "4") | .needs | join(",")')"
+plan_md="$(cat "$STATE_DIR/plan.md")"
+assert_contains "plan.md: an item on the batch model" "- #1 Add greeting (sonnet)" "$plan_md"
+assert_contains "plan.md: an item with its own tier" "- #2 Add greeting tests (haiku)" "$plan_md"
+assert_contains "plan.md: an item with needs" "- #4 Pick a date format (opus, needs #1)" "$plan_md"
+
+echo "state.sh: item workers and attempts"
 use_state base.json
-branch="$(st record worker-started 1)"
-assert_contains "worker-started names the branch" "backlog-loop/20260101-000000/b1-t1" "$branch"
-assert_eq "batch and items are in progress" "in-progress/working/in-progress" "$(b1 '"\(.status)/\(.phase)"')/$(sget '.items[0].status')"
-st record worker-done 1 >/dev/null
-assert_eq "worker-done without a pushed branch counts as a failed attempt" "1/implement" "$(attempts 1)/$(b1 .phase)"
-st record worker-started 1 >/dev/null
-st record worker-failed 1 --reason "crashed" >/dev/null
-st record worker-started 1 >/dev/null
-st record worker-failed 1 --reason "crashed again" >/dev/null
-assert_eq "three failed attempts queue the items for blocking" "3/block/blocking" "$(attempts 1)/$(sget '.items[0].pending')/$(b1 .phase)"
+branch="$(st record item-started 1)"
+assert_contains "item-started names the item branch" "backlog-loop/20260101-000000/b1/i1-t1" "$branch"
+assert_eq "batch and item are working" "in-progress/working/in-progress/working" "$(b1 '"\(.status)/\(.phase)"')/$(sget '.items[0] | "\(.status)/\(.phase)"')"
+assert_contains "an item cannot start twice" "already" "$(st record item-started 1 2>&1)"
+st record item-done 1 >/dev/null
+assert_eq "no commit on the item branch: attempt counted, item moves to the next batch" "1/2/null" "$(attempts 1)/$(sget '.items[0] | "\(.batch)/\(.phase)"')"
+assert_contains "the reason names the missing commit" "no commit" "$(sget '.items[0].last_error')"
+assert_eq "the move is recorded" "1->2" "$(sget '.items[0].moves | map("\(.from)->\(.to)") | join(",")')"
+assert_eq "the batch goes on with the rest" "2/1" "$(b1 '.items | join(",")')/$(b1 '.removed | join(",")')"
+use_state base.json '.items[0].attempts = 2'
+st record item-started 1 >/dev/null
+st record item-failed 1 --reason "crashed" >/dev/null
+assert_eq "out of attempts: queued for blocking, not moved" "3/block/1" "$(attempts 1)/$(sget '.items[0] | "\(.pending)/\(.batch)"')"
+use_state base.json
+st record item-started 1 >/dev/null
+st record unclear 1 --question "which?" >/dev/null
+st record item-done 1 >/dev/null
+assert_eq "an unclear item waits for research without an attempt" "0/1/null/pending" "$(attempts 1)/$(sget '.items[0] | "\(.batch)/\(.phase)/\(.research)"')"
+use_state base.json
+st record item-started 4 >/dev/null
+st record item-failed 4 --reason "crashed" >/dev/null
+assert_eq "with no later batch a new last batch is made" "4/Deferred items/4/todo" "$(sget '.items[3].batch')/$(sget '.batches[3] | "\(.theme)/\(.order)/\(.status)"')"
+use_state base.json
+st record item-started 3 >/dev/null
+st record item-failed 3 --reason "crashed" >/dev/null
+assert_eq "a batch whose last item moved on is closed" "closed" "$(sget '.batches[1].status')"
 
 echo "state.sh: research"
 use_state base.json
@@ -141,11 +169,17 @@ use_state base.json "$DEFS inprog(1; \"ci\") | .batches[0].ci_reruns = 1 | .item
 st record ci 1 red "ci"
 assert_eq "an item out of attempts is dropped while the rest goes on" "drop/null/fix" "$(sget '.items[0].pending')/$(sget '.items[1].pending')/$(b1 .phase)"
 
+use_state base.json "$DEFS inprog(1; \"ci\") | .config.batch_commits = \"squashed\" | .batches[0].ci_reruns = 1 | .items[0].attempts = 2"
+st record ci 1 red "ci"
+assert_eq "squashed: an item out of attempts is blocked, not dropped" "block" "$(sget '.items[0].pending')"
+
 echo "state.sh: poison"
 use_state base.json "$DEFS inprog(1; \"fix\") | .batches[0].failures = 2 | .items[0].attempts = 2 | .items[1].attempts = 2"
 st record poison 1 2 --reason "its test hangs" >/dev/null
 assert_eq "the culprit is queued for dropping, the rest is refunded" "0/2/drop" "$(attempts 1)/$(attempts 2)/$(sget '.items[1].pending')"
 assert_contains "poison checks batch membership" "not in batch" "$(st record poison 1 3 2>&1)"
+use_state base.json "$DEFS inprog(1; \"fix\") | .config.batch_commits = \"squashed\""
+assert_contains "squashed: a single item cannot be dropped" "batch-commits is squashed" "$(st record poison 1 2 2>&1)"
 
 echo "state.sh: conflicts and merging"
 use_state base.json "$DEFS inprog(1; \"merge\")"
@@ -156,8 +190,8 @@ assert_eq "first conflict -> one fix attempt" "conflict" "$(b1 .phase)"
 st record conflict-failed 1 >/dev/null
 assert_eq "failed conflict fix re-queues the batch last" "todo/2/4/null" "$(b1 '"\(.status)/\(.tries)/\(.order)/\(.pr)"')"
 assert_eq "re-queued items are todo again" "todo" "$(sget '.items[0].status')"
-st record worker-started 1 >/dev/null
-assert_contains "the retry uses a new branch" "b1-t2" "$(b1 .branch)"
+assert_eq "the retry gets a new batch branch" "2/null" "$(b1 '"\(.tries)/\(.branch)"')"
+assert_eq "re-queued items start over" "null" "$(sget '.items[0].phase')"
 use_state base.json "$DEFS inprog(1; \"conflict\") | .batches[0].requeues = 1"
 st record conflict-failed 1 >/dev/null
 assert_eq "a second re-queue blocks the items instead" "blocking/block" "$(b1 .phase)/$(sget '.items[0].pending')"
@@ -204,10 +238,10 @@ assert_eq "a second session is refused" "1" "$(acquire two)"
 touch -t 202001010000 "$STATE_DIR/lock"
 assert_eq "a stale lock is taken over" "0" "$(acquire two)"
 assert_eq "the lock names its owner" "two" "$(sed -n 1p "$STATE_DIR/lock")"
-use_state base.json "$DEFS inprog(1; \"working\") | .batches[0].pr = null | .run.status = \"halted\" | .run.halt_reason = \"iteration limit\" | .run.iterations = 100"
+use_state base.json "$DEFS inprog(1; \"working\") | .batches[0].pr = null | .items[0].phase = \"working\" | .run.status = \"halted\" | .run.halt_reason = \"iteration limit\" | .run.iterations = 100"
 st resume --session three >/dev/null
 assert_eq "resume restarts the run with a fresh budget" "running/0/null" "$(sget '"\(.run.status)/\(.run.iterations)/\(.run.halt_reason)"')"
-assert_eq "a lost worker goes back to implement" "implement" "$(b1 .phase)"
+assert_eq "a lost item worker's item starts again, without an attempt" "null/0" "$(sget '.items[0] | "\(.phase)/\(.attempts)"')"
 assert_contains "a second session cannot resume a live run" "holds" "$(st resume --session four 2>&1)"
 use_state base.json '.run.status = "done"'
 assert_contains "a finished run is not resumed" "already finished" "$(st resume --session x 2>&1)"
@@ -251,6 +285,7 @@ use_state base.json "$DEFS inprog(1; \"merge\") | inprog(2; \"merge\")
   | .batches[0].fixes = 1 | .batches[1].ci_reruns = 1
   | .items |= map(if .batch < 3 then .status = \"merged\" else . end)
   | .items[3] |= (.status = \"merged\" | .needs_review = true | .decision = \"decisions/4.md\")
+  | .items[2].moves = [{from: 2, to: 3, why: \"worker crashed\"}]
   | .items[4] |= (.status = \"blocked\" | .batch = null | .blocked_reason = {tried: \"t\", why: \"needs production API credentials\", needs: \"credentials\"})"
 report="$("$S/report.sh")"
 assert_contains "report: headline" "Backlog loop finished: done" "$report"
@@ -262,6 +297,7 @@ assert_contains "report: review" "Review:  #4 decided with low confidence, see d
 assert_contains "report: retries" "Retries: batch 1 (1 fix), batch 2 (1 CI rerun)" "$report"
 assert_contains "report: path" "Report:  .planning/backlog-loop/report.md" "$report"
 assert_eq "report.md is written" "yes" "$([ -s "$STATE_DIR/report.md" ] && echo yes)"
+assert_contains "report: moved items" "Moved:   #3 from batch 2 to batch 3: worker crashed" "$("$S/report.sh")"
 assert_contains "report.md names each batch's model" '- Batch 1 "Greeting" (sonnet): merged' "$(cat "$STATE_DIR/report.md")"
 
 t_summary

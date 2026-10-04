@@ -157,9 +157,9 @@ guarded, because jq 1.6 exits 0 there.
   touching the scripts.
 - `state.json` carries `version: 1`.
 
-## 6. Proposed: parallel items per batch
+## 6. Parallel items per batch
 
-**Status:** proposed, 2026-10-04. Not built. Replaces parts of sections 3 and
+**Status:** accepted, 2026-10-04. Replaces parts of sections 3 and
 5 once accepted.
 
 ### Context

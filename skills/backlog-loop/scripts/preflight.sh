@@ -211,13 +211,11 @@ case "$C_CI" in required | none) ;; *) config_errors="$config_errors ci must be 
 config_errors="${config_errors# }"
 
 if [ "$PROBES" -eq 1 ]; then
-  # One harmless command per class. Claude runs each as its own Bash call, so
-  # a missing permission shows up now and not hours into an unattended run.
+  # Harmless commands Claude runs as its own Bash calls, so a missing permission
+  # shows up now and not hours into an unattended run. No test suite is run
+  # here: whether the base branch is green is read from CI further down.
   echo "git status --short"
   echo "gh auth status"
-  for c in "$C_TEST" "$C_LINT" "$C_BUILD"; do
-    case "$c" in "" | none) ;; *) echo "$c" ;; esac
-  done
   exit 0
 fi
 
@@ -459,29 +457,30 @@ else
   fail "Worktrees" "git worktree add failed" "run 'git worktree prune' and check that the repository is not bare or locked"
 fi
 
-# --- Baseline ---------------------------------------------------------------------------------
+# --- Baseline: the CI result of the base branch, never a local test run -----------------------
 
-if [ -z "$config_errors" ] && [ "$tree_ok" -eq 1 ]; then
-  base_ok=1
-  out="$(mktemp "${TMPDIR:-/tmp}/backlog-loop-baseline.XXXXXX")"
-  mins="$(limit baseline-minutes 30)"
-  for class in test lint build; do
-    case "$class" in test) c="$C_TEST" ;; lint) c="$C_LINT" ;; *) c="$C_BUILD" ;; esac
-    [ "$c" != "none" ] || continue
-    bl_with_deadline $((mins * 60)) "$out" "$c"
-    rc=$?
-    if [ "$rc" -eq 124 ]; then
-      fail "Baseline" "'$c' did not finish within $mins minutes on $C_BASE" "make it faster, or raise baseline-minutes in the Backlog loop section"
-      base_ok=0
-    elif [ "$rc" -ne 0 ]; then
-      fail "Baseline" "'$c' fails on $C_BASE: $(tail -n 2 "$out" | tr '\n' ' ' | cut -c1-200)" "$C_BASE must be green before starting"
-      base_ok=0
-    fi
-  done
-  rm -f "$out"
-  [ "$base_ok" -eq 0 ] || pass
-else
-  warn "Baseline" "skipped because the configuration or the working tree check failed"
+if [ -n "$REPO" ] && [ -n "$C_BASE" ]; then
+  sha="$(git rev-parse "refs/remotes/origin/$C_BASE" 2>/dev/null)"
+  base_checks="$(
+    gh api "repos/$REPO/commits/$sha/check-runs" \
+      --jq '.check_runs[] | "\(.name)\t\(.status // "completed")\t\(.conclusion // "")"' 2>/dev/null
+    gh api "repos/$REPO/commits/$sha/status" \
+      --jq '.statuses[] | "\(.context)\t\(if .state == "pending" then "in_progress" else "completed" end)\t\(.state)"' 2>/dev/null
+  )"
+  TAB="$(printf '\t')"
+  red="$(printf '%s\n' "$base_checks" | awk -F "$TAB" '$3 ~ /^(failure|timed_out|cancelled|action_required|startup_failure|error)$/ { print $1 }' | sort -u | tr '\n' ' ')"
+  running="$(printf '%s\n' "$base_checks" | awk -F "$TAB" '$1 != "" && $2 != "completed" { print $1 }' | sort -u | tr '\n' ' ')"
+  if [ -n "$red" ]; then
+    fail "Baseline" "CI is red on $C_BASE: ${red% }" "$C_BASE must be green before starting"
+  elif [ -n "$running" ]; then
+    pass
+    warn "Baseline" "CI is still running on $C_BASE (${running% }); the loop starts without a confirmed green base"
+  elif [ -z "$base_checks" ]; then
+    pass
+    warn "Baseline" "no CI result for the head of $C_BASE; the loop starts without a confirmed green base"
+  else
+    pass
+  fi
 fi
 
 # --- Claude tools: deny and ask rules in settings ------------------------------------------------

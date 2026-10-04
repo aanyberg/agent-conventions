@@ -117,27 +117,26 @@ SPLIT='{"batches":[{"theme":"A","items":["1","2"]},{"theme":"B","items":["3"]},{
 # ------------------------------------------------------------------------------------
 echo "scenario: preflight collects every failure and changes nothing"
 new_repo
-touch .break-base
-git add .break-base && git commit -q -m "break the base" && git update-ref refs/remotes/origin/main HEAD
+touch .ci-fail
+git add .ci-fail && git commit -q -m "break the base" && git update-ref refs/remotes/origin/main HEAD
 echo "dirty" >>CLAUDE.md
 jq '.rules = [{"type": "pull_request", "parameters": {"required_approving_review_count": 1}}]
   | .repo.squashMergeAllowed = false' "$GH" >"$GH.t" && mv "$GH.t" "$GH"
 out="$("$S/preflight.sh" --session dry 2>&1)"
 rc=$?
 assert_eq "preflight exits non-zero" "1" "$rc"
-assert_contains "summary line counts failures" "passed, 3 failed" "$(printf '%s\n' "$out" | sed -n 1p)"
+assert_contains "summary line counts failures" "passed, 4 failed" "$(printf '%s\n' "$out" | sed -n 1p)"
 assert_contains "branch rule failure, as specified" "FAIL  Branch rules: main requires 1 approving review" "$out"
 assert_contains "each failure comes with a fix" "      Fix: allow bypass for your account, or run with --no-merge" "$out"
 assert_contains "dirty tree is reported" "FAIL  Working tree: tracked files have uncommitted changes" "$out"
 assert_contains "merge method is reported" "FAIL  PR and merge: merge method 'squash' is not allowed" "$out"
-assert_contains "baseline is skipped, as a warning, when the tree is dirty" "WARN  Baseline: skipped" "$out"
+assert_contains "a red base branch fails the baseline, read from CI" "FAIL  Baseline: CI is red on main: ci" "$out"
+assert_contains "the baseline fix is stated" "Fix: main must be green before starting" "$out"
 assert_contains "it says nothing was changed" "Nothing was changed." "$(printf '%s\n' "$out" | tail -n 1)"
 assert_eq "no state was created" "no" "$([ -e "$STATE" ] || [ -e "$DIR/config.json" ] && echo yes || echo no)"
 assert_eq "no ignore entry was written" "1" "$(git check-ignore -q "$DIR/state.json"; echo $?)"
 git checkout -q CLAUDE.md
 out="$("$S/preflight.sh" --session dry --no-merge 2>&1)"
-assert_contains "a red base branch fails the baseline" "FAIL  Baseline: 'sh ./checks.sh test' fails on main" "$out"
-assert_contains "the baseline fix is stated" "Fix: main must be green before starting" "$out"
 case "$out" in *"Branch rules: main requires"*) not_ok "--no-merge accepts required approvals" ;; *) ok "--no-merge accepts required approvals" ;; esac
 
 new_repo
@@ -171,7 +170,11 @@ assert_contains "restricted updates are a warning" "WARN  Branch rules: a rulese
 new_repo
 out="$("$S/preflight.sh" --session dry --gitignore 2>&1)"
 assert_contains "--gitignore writes .gitignore" ".planning/backlog-loop/" "$(cat .gitignore)"
-assert_contains "probes list one command per class" "sh ./checks.sh test" "$("$S/preflight.sh" --probes)"
+assert_eq "probes never run the test suite" "git status --short|gh auth status|" "$("$S/preflight.sh" --probes | tr '\n' '|')"
+touch .break-base
+git add .break-base && git commit -q -m "locally broken, CI green" && git update-ref refs/remotes/origin/main HEAD
+out="$("$S/preflight.sh" --session dry 2>&1)"
+assert_contains "preflight runs no local tests: a locally failing suite does not stop it" " 0 failed" "$out"
 
 # ------------------------------------------------------------------------------------
 echo "scenario: flaky CI passes after one rerun"

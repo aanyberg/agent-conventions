@@ -136,7 +136,14 @@ case "$group $cmd" in
     case "$cmd" in
       */rules/branches/*) db '.rules // []' | out ;;
       */protection) db -e '.protection // empty' | out || exit 1 ;;
-      */check-runs) echo '{"total_count":1,"check_runs":[{"name":"ci"}]}' | out ;;
+      */check-runs)
+        # The commit's CI result, read from its tree like a PR's checks.
+        sha="${cmd%/check-runs}"
+        sha="${sha##*/}"
+        conclusion="success"
+        if g cat-file -e "$sha:.ci-fail" 2>/dev/null; then conclusion="failure"; fi
+        jq -n --arg c "$conclusion" '{total_count: 1, check_runs: [{name: "ci", status: "completed", conclusion: $c}]}' | out
+        ;;
       */status) echo '{"statuses":[]}' | out ;;
       *) echo "gh stub: unsupported api path $cmd" >&2; exit 1 ;;
     esac

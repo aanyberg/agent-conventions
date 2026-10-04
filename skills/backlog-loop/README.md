@@ -58,7 +58,7 @@ tree. Preflight checks all of that and prints every problem with its fix:
 Preflight: 10 passed, 2 failed, 1 warning
 FAIL  Branch rules: main requires 1 approving review
       Fix: allow bypass for your account, or run with --no-merge
-FAIL  Baseline: 'npm test' fails on main: 3 tests failed
+FAIL  Baseline: CI is red on main: test
       Fix: main must be green before starting
 WARN  Research: deny rule 'WebFetch' in .claude/settings.json; research uses the codebase only
 Nothing was changed.
@@ -167,8 +167,7 @@ Set this up once, before the first unattended run.
   run resumable, so the default is safe; a higher cap means fewer manual
   `/backlog-loop` restarts on a long run. `0` removes the cap.
 - Slow test suites: the Bash tool stops waiting after 10 minutes. Raise
-  `BASH_MAX_TIMEOUT_MS` in `env` if preflight or the post-merge check needs
-  longer.
+  `BASH_MAX_TIMEOUT_MS` in `env` if the post-merge check needs longer.
 
 Other modes:
 
@@ -180,9 +179,10 @@ Other modes:
 | `plan` | No: nothing can be written. |
 | `bypassPermissions` | Works, but only in a container or VM. |
 
-Preflight helps: the skill has Claude run one probe command per class (git, gh,
-test, lint, build) at the very start, so a missing rule shows while you are
-still there. It also fails on `deny` and `ask` rules that match commands the
+Preflight helps: the skill has Claude run a `git` and a `gh` probe command at
+the very start, so a missing rule shows while you are still there. It does not
+run your test suite; a missing rule for the test, lint or build command shows
+up when the first worker runs it. It also fails on `deny` and `ask` rules that match commands the
 loop needs, in user, project, local and managed settings.
 
 What the run can never do, enforced by the guard hook while a run is active:
@@ -195,7 +195,8 @@ and the base branch must not require human approval (or use `--no-merge`).
 ## What a run looks like
 
 1. **Preflight.** Tools, auth, push probe, branch rules, CI, clean tree,
-   worktree probe, green baseline, permission rules, lock.
+   worktree probe, permission rules, lock. The baseline is the CI result of the
+   base branch head, read from GitHub; no tests are run locally.
 2. **Plan.** All items are read and clustered; see `reference/batching.md`.
 3. **Per batch.** A worker in its own worktree implements it, one commit per
    item. One PR. CI is awaited with a deadline. The PR is brought up to date
@@ -254,7 +255,7 @@ To look without changing anything:
 | Hooks do nothing | The skill is not at `~/.claude/skills/backlog-loop` or `<project>/.claude/skills/backlog-loop`. Set `BACKLOG_LOOP_HOME`. Check with `/hooks`. |
 | `Backlog loop halted: base branch was red ...` | A merge broke the base branch and was reverted. Its items are blocked with the reason. `/backlog-loop --resume` continues with the remaining batches. |
 | `halted: remaining batches depend on pull requests that wait for a human merge` | `--no-merge`: merge the listed PRs, then `/backlog-loop --resume`. |
-| Preflight or the post-merge check is cut off | The suite takes longer than the Bash tool allows. Raise `BASH_MAX_TIMEOUT_MS`, and `baseline-minutes` if it exceeds 30 minutes. |
+| The post-merge check is cut off | The suite takes longer than the Bash tool allows. Raise `BASH_MAX_TIMEOUT_MS`, and `baseline-minutes` if it exceeds 30 minutes. |
 | State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active. |
 
 ## Tests

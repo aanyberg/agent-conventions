@@ -28,8 +28,15 @@ skill with `claude -p`.
 | `${CLAUDE_SESSION_ID}` | Substituted in the skill body and equal to `session_id` in hook input. Probed. | The lock and the gate compare the two. |
 
 Not verified: a full unattended run in an interactive session. The hooks were
-probed with `claude -p` only, and the GitHub calls were exercised against the
-stub, not against a real repository.
+probed with `claude -p` only. The GitHub write paths (PR create, merge, revert,
+update-branch, rerun, labels, comments) were exercised against the stub only;
+the read paths and the flags were checked against real `gh` 2.102.
+
+Portability: the suite passes on macOS (bash 3.2, jq 1.7.1, shellcheck 0.11)
+and in a Debian 12 container (bash 5.2, jq 1.6, git 2.39, shellcheck 0.9).
+jq 1.6 shaped two things: no jq reserved word (`label`, `try`, `then`) is used
+as a bare key or variable, and every `jq -e` on text that may be empty is
+guarded, because jq 1.6 exits 0 there.
 
 ## 2. Deviations from the specification
 
@@ -81,7 +88,8 @@ stub, not against a real repository.
   `next.sh`, `ci-wait.sh`, `state.sh record` and the guard hook. Another
   session may take it over after 15 minutes without a heartbeat.
 - A finished run is moved to `archive/<run id>/` when the next run starts.
-- Branch names: `backlog-loop/<run id>/b<batch>-t<try>`.
+- Branch names: `backlog-loop/<run id>/b<batch>-t<tries>`. A re-queued or
+  reset batch gets a new branch.
 
 **Loop**
 

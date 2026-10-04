@@ -7,8 +7,9 @@ branch. Unclear items are researched and decided. Items that cannot be finished
 are marked blocked with a reason. The run survives compaction, crashes, usage
 limits and a closed terminal.
 
-Requires `git`, `gh` and `jq`, on macOS or Linux. Developed and checked against
-Claude Code 2.1.289, gh 2.102 and bash 3.2 (the macOS default).
+Requires `git`, `gh` and `jq` (1.6 or later), on macOS or Linux. Developed
+against Claude Code 2.1.289 and gh 2.102. The test suite passes on macOS
+(bash 3.2, jq 1.7) and on Debian 12 (bash 5.2, jq 1.6, git 2.39).
 
 ## Install
 
@@ -259,7 +260,7 @@ To look without changing anything:
 ## Tests
 
 ```bash
-tests/run.sh            # everything, about two minutes
+tests/run.sh            # everything, about three minutes
 tests/run.sh --quick    # unit suites only
 tests/dry-run.sh github # the full loop on a fixture repository, no network
 tests/dry-run.sh file

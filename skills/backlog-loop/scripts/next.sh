@@ -26,7 +26,7 @@ emit() {
     { action: $action, run: $run, iteration: $iteration, summary: $summary }
     + ($ARGS.named | del(.action, .summary, .run, .iteration))
     + { instructions: [inputs | select(length > 0)],
-        then: (if $action == "done" or $action == "halt" then "Stop. Show the report to the user."
+        "then": (if $action == "done" or $action == "halt" then "Stop. Show the report to the user."
                else "Run next.sh again and do what it returns." end) }'
 }
 

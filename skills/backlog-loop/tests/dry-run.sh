@@ -92,10 +92,8 @@ implement() {
   "$S/state.sh" record worker-done "$b" >/dev/null
 }
 
-gate() {
-  # gate [extra hook input]: run the Stop hook as Claude Code would.
-  hook_input Stop "$REPO" "${1:-}" | "$S/stop-gate.sh"
-}
+# Run the Stop hook as Claude Code would.
+gate() { hook_input Stop "$REPO" | "$S/stop-gate.sh"; }
 
 guard() { bash_input "$REPO" "$1" | "$S/guard.sh"; }
 

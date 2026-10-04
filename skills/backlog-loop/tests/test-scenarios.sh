@@ -26,7 +26,7 @@ OUT=""
 new_repo() {
   N=$((N + 1))
   REPO="$T_TMP/repo$N"
-  make_fixture "$REPO" "${1:-github}"
+  make_fixture "$REPO" github
   cd "$REPO" || exit 1
   DIR="$REPO/.planning/backlog-loop"
   STATE="$DIR/state.json"
@@ -56,7 +56,7 @@ worker() {
 }
 
 # What the simulated worker writes for an item. Scenarios override this.
-# shellcheck disable=SC2329
+# shellcheck disable=SC2317,SC2329
 item_snippet() { printf "echo 'feature %s' > feature-%s.txt;" "$1" "$1"; }
 
 implement() {
@@ -161,6 +161,12 @@ git add .claude && git commit -q -m "settings" && git update-ref refs/remotes/or
 out="$("$S/preflight.sh" --session dry 2>&1)"
 assert_contains "a deny rule on a needed command fails" "FAIL  Claude tools: deny rule 'Bash(git push *)'" "$out"
 assert_contains "a denied web tool is a warning" "WARN  Research: deny rule 'WebFetch'" "$out"
+
+new_repo
+jq '.rules = [{"type": "merge_queue"}, {"type": "update"}]' "$GH" >"$GH.t" && mv "$GH.t" "$GH"
+out="$("$S/preflight.sh" --session dry 2>&1)"
+assert_contains "a merge queue fails without --no-merge" "FAIL  Branch rules: main uses a merge queue" "$out"
+assert_contains "restricted updates are a warning" "WARN  Branch rules: a ruleset restricts updates to main" "$out"
 
 new_repo
 out="$("$S/preflight.sh" --session dry --gitignore 2>&1)"
@@ -268,7 +274,7 @@ new_repo
 start "$SPLIT" && run_until resolve_conflict
 old_branch="$(bq 2 '.branch')"
 "$S/state.sh" record conflict-failed 2 >/dev/null
-assert_eq "the batch is back in the queue, last, on a new try" "todo/2/CLOSED" "$(bq 2 '"\(.status)/\(.try)"')/$(jq -r '.prs[] | select(.head | test("b2-t1")) | .state' "$GH")"
+assert_eq "the batch is back in the queue, last, on a new try" "todo/2/CLOSED" "$(bq 2 '"\(.status)/\(.tries)"')/$(jq -r '.prs[] | select(.head | test("b2-t1")) | .state' "$GH")"
 run_until "done"
 assert_eq "the re-queued batch merges from the new base" "done/merged" "$ACTION/$(bq 2 '.status')"
 assert_eq "its stale branch is gone from the remote" "" "$(git rev-parse -q --verify "refs/remotes/origin/$old_branch" || true)"

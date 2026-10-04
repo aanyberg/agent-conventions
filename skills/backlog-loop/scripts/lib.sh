@@ -170,7 +170,8 @@ bl_with_deadline() {
 bl_pr_checks() {
   local out
   out="$(gh pr checks "$1" --json name,bucket 2>&1)"
-  if printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1; then
+  # The emptiness test matters: jq 1.6 exits 0 for `jq -e` on empty input.
+  if [ -n "$out" ] && printf '%s' "$out" | jq -e 'type == "array"' >/dev/null 2>&1; then
     printf '%s' "$out" | jq -r '
       if length == 0 then "none"
       elif any(.[]; .bucket == "fail" or .bucket == "cancel") then "red"

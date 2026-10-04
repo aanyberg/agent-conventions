@@ -361,8 +361,9 @@ fi
 if [ -n "$REPO" ] && [ -n "$C_BASE" ]; then
   rules="$(gh api "repos/$REPO/rules/branches/$C_BASE" 2>/dev/null)"
   protection="$(gh api "repos/$REPO/branches/$C_BASE/protection" 2>/dev/null)"
-  printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1 || rules="[]"
-  printf '%s' "$protection" | jq -e '.url' >/dev/null 2>&1 || protection="{}"
+  # The emptiness tests matter: jq 1.6 exits 0 for `jq -e` on empty input.
+  { [ -n "$rules" ] && printf '%s' "$rules" | jq -e 'type == "array"' >/dev/null 2>&1; } || rules="[]"
+  { [ -n "$protection" ] && printf '%s' "$protection" | jq -e '.url' >/dev/null 2>&1; } || protection="{}"
   approvals="$(jq -n --argjson r "$rules" --argjson p "$protection" '
     [($r[] | select(.type == "pull_request") | .parameters.required_approving_review_count // 0),
      ($p.required_pull_request_reviews.required_approving_review_count // 0)] | max')"
@@ -395,6 +396,13 @@ EOT
     fi
   elif [ -z "$required" ] && [ "$C_CI" != "none" ]; then
     warn "Branch rules" "$C_BASE has no required status checks; the loop still waits for every check on each PR"
+  fi
+  if [ "$NO_MERGE" -eq 0 ] && [ "$(jq -n --argjson r "$rules" '[$r[] | select(.type == "merge_queue")] | length')" -gt 0 ]; then
+    fail "Branch rules" "$C_BASE uses a merge queue, which the loop cannot verify step by step" "run with --no-merge and queue the pull requests yourself"
+    rules_ok=0
+  fi
+  if [ "$NO_MERGE" -eq 0 ] && [ "$(jq -n --argjson r "$rules" '[$r[] | select(.type == "update")] | length')" -gt 0 ]; then
+    warn "Branch rules" "a ruleset restricts updates to $C_BASE; merging works only if your account is on its bypass list"
   fi
   [ "$rules_ok" -eq 0 ] || pass
 fi
@@ -550,7 +558,7 @@ if [ "$C_SOURCE" = "github" ]; then
   gh label create blocked --description "Blocked, needs human input (backlog-loop)" --color B60205 >/dev/null 2>&1 || true
   gh label create needs-review --description "Decided with low confidence (backlog-loop)" --color FBCA04 >/dev/null 2>&1 || true
 fi
-jq -n --arg source "$C_SOURCE" --arg label "$C_LABEL" --arg path "$C_PATH" --arg base "$C_BASE" \
+jq -n --arg source "$C_SOURCE" --arg lbl "$C_LABEL" --arg path "$C_PATH" --arg base "$C_BASE" \
   --arg repo "$REPO" --arg test "$C_TEST" --arg lint "$C_LINT" --arg build "$C_BUILD" \
   --arg method "$C_METHOD" --arg ci "$C_CI" --argjson web "$RESEARCH_WEB" \
   --argjson max_attempts "$(limit max-attempts 3)" --argjson ci_reruns "$(limit ci-reruns 1)" \
@@ -559,7 +567,7 @@ jq -n --arg source "$C_SOURCE" --arg label "$C_LABEL" --arg path "$C_PATH" --arg
   --argjson iterations "$(limit max-iterations 100)" --argjson hours "$(limit max-hours 12)" \
   --argjson worker "$(limit worker-wait-minutes 120)" --argjson baseline "$(limit baseline-minutes 30)" \
   --argjson batch_items "$(limit max-batch-items 15)" '
-  { source: $source, label: $label, path: $path, base_branch: $base, repo: $repo,
+  { source: $source, "label": $lbl, path: $path, base_branch: $base, repo: $repo,
     test: $test, lint: $lint, build: $build, merge_method: $method, ci: $ci, research_web: $web,
     limits: { max_attempts: $max_attempts, ci_reruns: $ci_reruns, ci_wait_minutes: $ci_wait,
               research_passes: $research, parallel_batches: $parallel, stall_threshold: $stall,

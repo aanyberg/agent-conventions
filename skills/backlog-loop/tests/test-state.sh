@@ -143,7 +143,7 @@ assert_eq "behind base -> rebase" "rebase" "$(b1 .phase)"
 st record conflict 1
 assert_eq "first conflict -> one fix attempt" "conflict" "$(b1 .phase)"
 st record conflict-failed 1 >/dev/null
-assert_eq "failed conflict fix re-queues the batch last" "todo/2/4/null" "$(b1 '"\(.status)/\(.try)/\(.order)/\(.pr)"')"
+assert_eq "failed conflict fix re-queues the batch last" "todo/2/4/null" "$(b1 '"\(.status)/\(.tries)/\(.order)/\(.pr)"')"
 assert_eq "re-queued items are todo again" "todo" "$(sget '.items[0].status')"
 st record worker-started 1 >/dev/null
 assert_contains "the retry uses a new branch" "b1-t2" "$(b1 .branch)"

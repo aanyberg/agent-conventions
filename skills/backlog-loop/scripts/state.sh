@@ -27,7 +27,7 @@ def set_item($i; f): .items |= map(if .id == $i then f else . end);
 def new_batch($id; $theme; $items; $deps; $order): {
   id: $id, kind: "items", theme: $theme, title: null, rationale: null,
   items: $items, order: $order, depends_on: $deps,
-  status: "todo", phase: null, try: 1, branch: null, old_branches: [], pushed: false,
+  status: "todo", phase: null, tries: 1, branch: null, old_branches: [], pushed: false,
   pr: null, revert_pr: null, head_sha: null, premerge_sha: null, merge_commit: null,
   ci_reruns: 0, ci_polls: 0, ci_started_at: null, worker_started_at: null,
   fixes: 0, failures: 0, conflict_attempts: 0, requeues: 0, merge_tries: 0,
@@ -80,7 +80,7 @@ load_items() {
   local source label path raw
   source="$(jq -r '.source' "$BL_CONFIG")"
   if [ "$source" = "github" ]; then
-    label="$(jq -r '.label' "$BL_CONFIG")"
+    label="$(jq -r '.["label"]' "$BL_CONFIG")"
     raw="$(gh issue list --label "$label" --state open --limit 500 --json number,title,labels,url 2>&1)" ||
       bl_die "gh issue list failed: $raw"
     printf '%s' "$raw" | jq '[.[] | {id: (.number | tostring), title, url,
@@ -210,7 +210,7 @@ cmd_plan_apply() {
   local file="${1:-}" errors max
   need_state
   [ -f "$file" ] || bl_die "usage: state.sh plan-apply <plan.json>"
-  jq -e '.batches | type == "array"' "$file" >/dev/null 2>&1 || bl_die "plan needs a top-level \"batches\" array: $file"
+  { [ -s "$file" ] && jq -e '.batches | type == "array"' "$file" >/dev/null 2>&1; } || bl_die "plan needs a top-level \"batches\" array: $file"
   [ "$(bl_get '[.batches[] | select(.status != "todo")] | length')" = "0" ] ||
     bl_die "batches are already in flight; the plan can no longer be replaced"
   max="$(bl_limit max_batch_items)"
@@ -510,7 +510,7 @@ requeue_batch() {
         | set_batch($b; .phase = "blocking" | .last_error = "merge conflict persists after re-queue")
       else
         set_items($b; .status = "todo")
-        | set_batch($b; .status = "todo" | .phase = null | .requeues += 1 | .try += 1
+        | set_batch($b; .status = "todo" | .phase = null | .requeues += 1 | .tries += 1
             | .old_branches += [.branch] | .branch = null | .pr = null | .pushed = false
             | .head_sha = null | .premerge_sha = null | .conflict_attempts = 0 | .order = $last)
       end'
@@ -544,7 +544,7 @@ record_worker_started() {
   cmd_cleanup "$b"
   upd --argjson b "$b" --argjson now "$(bl_now)" --arg run "$(bl_get '.run.id')" "$JQ_DEFS"'
     set_batch($b; .status = "in-progress" | .phase = "working" | .worker_started_at = $now
-      | .branch = (.branch // "backlog-loop/\($run)/b\(.id)-t\(.try)"))
+      | .branch = (.branch // "backlog-loop/\($run)/b\(.id)-t\(.tries)"))
     | set_items($b; .status = "in-progress")'
   bl_log "worker-started batch=$b branch=$(bq "$b" '.branch')"
   bq "$b" '.branch'
@@ -742,8 +742,9 @@ record_fix_pushed() {
   branch="$(bq "$b" '.branch')"
   fetch_ref "$branch"
   sha="$(remote_sha "$branch")"
-  [ -n "$sha" ] && [ "$sha" != "$(bq "$b" '.head_sha')" ] ||
+  if [ -z "$sha" ] || [ "$sha" = "$(bq "$b" '.head_sha')" ]; then
     bl_die "branch $branch has no new commit since the failure; nothing was fixed"
+  fi
   upd --argjson b "$b" --arg sha "$sha" --argjson now "$(bl_now)" "$JQ_DEFS"'
     set_batch($b; .fixes += 1 | .head_sha = $sha | .phase = "ci" | .ci_started_at = $now | .ci_polls = 0)'
   bl_log "fix-pushed batch=$b sha=$sha"
@@ -1070,7 +1071,7 @@ cmd_reconcile() {
             upd --argjson b "$b" "$JQ_DEFS"'
               if (.batches[] | select(.id == $b) | .kind) == "status" then set_batch($b; .status = "closed" | .phase = null)
               else set_items($b; .status = "todo")
-                | set_batch($b; .status = "todo" | .phase = null | .try += 1 | .old_branches += [.branch]
+                | set_batch($b; .status = "todo" | .phase = null | .tries += 1 | .old_branches += [.branch]
                     | .branch = null | .pr = null | .pushed = false | .head_sha = null | .premerge_sha = null)
               end'
             bl_log "reconcile batch=$b: PR #$pr was closed, batch reset to todo"

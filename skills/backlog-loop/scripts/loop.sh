@@ -675,10 +675,11 @@ pick_action() {
     elif .run.status != "running" then
       {action: "halt", reason: .run.reason, steps: ["Run: \($self) report", "Show its output unchanged and stop. Do not restart the loop yourself."]}
     elif .run.replan then
-      {action: "plan", summary: "Split the open backlog items into named batches.",
+      {action: "plan", summary: "Read every open backlog item, classify it, and split the buildable ones into named batches.",
        steps: [
          "Read \($self | sub("/scripts/loop.sh$"; ""))/reference/planning.md.",
-         "Read the backlog the way this repository keeps it, and the current plan with: \($self) status",
+         "Read every open backlog item the way this repository keeps it, and the current plan with: \($self) status",
+         "Classify each item: buildable, or left out as done, blocked or not-an-item, with a reason.",
          "Write the plan to \($dir)/plan.json",
          "Run: \($self) plan-apply   (fix what it rejects and run it again)",
          "Then run: \($self) next"]}
@@ -961,7 +962,19 @@ cmd_plan_apply() {
             elif (.tier // "standard") as $t | ["light", "standard", "complex"] | index($t) | not then "item \(.id): tier must be light, standard or complex"
             elif $s.items[.id | tostring].status == "merged" then "item \(.id) is already merged"
             else empty end),
-        ([$bs[] | (.items // [])[] | select(type == "object") | (.id // "") | tostring] | group_by(.)[] | select(length > 1) | "item \(.[0]) is in more than one batch")
+        ([$bs[] | (.items // [])[] | select(type == "object") | (.id // "") | tostring] | group_by(.)[] | select(length > 1) | "item \(.[0]) is in more than one batch"),
+        (if ($p.read | type) != "number" then "the plan needs \"read\": the number of open backlog items you read" else empty end),
+        (if ($p.left_out // [] | type) != "array" then "\"left_out\" must be an array" else
+          ([$bs[] | (.items // [])[] | select(type == "object") | (.id // "") | tostring]) as $planned
+          | (($p.left_out // [])[]
+            | if type != "object" or ((.id // "") | tostring) == "" or (.title // "") == "" then "every left-out item needs an id and a title"
+              elif (.reason // "") == "" then "left-out item \(.id) needs a reason"
+              elif (.category // "") as $c | ["done", "blocked", "not-an-item"] | index($c) | not then "left-out item \(.id): category must be done, blocked or not-an-item"
+              elif (.id | tostring) as $i | $planned | index($i) then "item \(.id) is in a batch and left out"
+              else empty end),
+            (($planned | length) + ($p.left_out // [] | length)) as $n
+            | if ($p.read | type) == "number" and $n > $p.read then "the plan names \($n) items but read is \($p.read)" else empty end
+          end)
       ] | unique | .[]')"
   if [ -n "$errs" ]; then
     printf 'plan.json was rejected:\n' >&2
@@ -984,6 +997,7 @@ cmd_plan_apply() {
                  | map_values(if .status == "aside" then .batch = null else . end)) + $new)
     | .config.source = (.config.source_cfg // $p.source // .config.source // "github")
     | .config.backlog = (.config.backlog_cfg // $p.backlog // .config.backlog // "BACKLOG.md")
+    | .plan = {read: $p.read, left_out: [($p.left_out // [])[] | {id: (.id | tostring), title, category, reason}]}
     | .planned_at = now
     | .run.replan = false'
   load
@@ -1328,6 +1342,22 @@ cmd_prompt() {
 
 # --- report ---------------------------------------------------------------
 
+# What the last plan read and left out. Nothing for a state without a plan.
+left_out_report() {
+  st '
+    select(.plan != null)
+    | .plan as $p
+    | (if .config.source == "file" then .config.backlog else "GitHub issues" end) as $from
+    | "",
+      "Left out of the plan (read \($p.read) open items from \($from))",
+      (if ($p.left_out | length) == 0 then "  nothing" else
+        (["done", "Already done"], ["blocked", "Blocked outside the repository"], ["not-an-item", "Not a work item"]
+          | . as [$c, $head] | [$p.left_out[] | select(.category == $c)]
+          | select(length > 0)
+          | "  \($head)", (.[] | "    \(.id): \(.title)", "      Why: \(.reason)"))
+       end)'
+}
+
 cmd_report() {
   paths
   local empty=true
@@ -1339,6 +1369,7 @@ cmd_report() {
   if [ "$empty" = "true" ]; then
     echo "Backlog loop: nothing to do. The last plan found no open backlog item that can be built here."
     echo "Run /backlog-loop plan after the backlog changes."
+    left_out_report
     return 0
   fi
   st '
@@ -1373,6 +1404,7 @@ cmd_report() {
           (.items[] as $i | $s.items[$i] | select(.status != "aside" and .status != "merged") | "    \(.id): \(.title)")),
         (if ($loose | length) > 0 then "  Not in a batch (run /backlog-loop plan):", ($loose[] | "    \(.id): \(.title)\(if .note then " - " + .note else "" end)") else empty end)
        end)'
+  left_out_report
 }
 
 # --- internal: used by hooks.sh -------------------------------------------

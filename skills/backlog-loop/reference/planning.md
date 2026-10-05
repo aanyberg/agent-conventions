@@ -13,22 +13,53 @@ the same batch tomorrow as today.
 
 Read the backlog the way this repository keeps it. Follow, in this order: the
 `## Backlog loop` section of `CLAUDE.md` or `AGENTS.md`, the repository's own
-instructions, then the evidence (a `BACKLOG.md`, or open GitHub issues with a
-backlog label).
+instructions, then the evidence (a `BACKLOG.md`, or open GitHub issues).
+
+Read every open item. No label, status or section narrows the list: you
+decide what each item is, see the next section.
 
 | Source | Open items are | Item id |
 |---|---|---|
-| `github` | Open issues with the configured label (default `backlog`). List them with `gh issue list --label <label> --state open --limit 200 --json number,title,labels,body`. | The issue number. |
-| `file` | Entries of the backlog file that are not done, cancelled or archived. | The entry's id, exactly as the file writes it. |
+| `github` | Every open issue. List them with `gh issue list --state open --limit 1000 --json number,title,labels,body`. If the list comes back as long as the limit, raise the limit and list again. | The issue number. |
+| `file` | Every entry of the backlog file that is not done, cancelled or archived. | The entry's id, exactly as the file writes it. |
 
-Leave out:
+Count the items you read. The count goes into the plan as `read`.
 
-- items that are done, cancelled or archived;
-- items the backlog itself marks as blocked on something outside the
-  repository (credentials, another repository, an owner decision), unless the
-  user said the blocker is gone;
-- items that `L status` lists under "Set aside", unless the user said what
-  they needed has been supplied.
+## Classifying the items
+
+Put every item you read into exactly one of four classes. The first goes
+into a batch; the other three go into the plan's `left_out` list with a
+category and a reason.
+
+| Class | Category | An item belongs here when |
+|---|---|---|
+| Buildable | (in a batch) | There is work left that a change in this repository delivers. |
+| Already done | `done` | Its code is merged and nothing is left to build here. What remains happens outside the repository, such as an operator run or a rollout. |
+| Blocked outside the repository | `blocked` | It waits on credentials, another repository, a third party or an owner decision that research cannot settle. |
+| Not a work item | `not-an-item` | It is an epic or tracking issue, a run summary, a discussion, or a duplicate of another open item. |
+
+Classify from the evidence, in this order:
+
+1. **The item's text**: what it asks for and what it says is still open.
+2. **The Git history and the code**: `git log --grep '#<id>'`, merged pull
+   requests that name the item, and whether the code it asks for exists.
+3. **The backlog's own marks**: labels such as `status:blocked`,
+   `needs-human` or `status:ready`, a status column, a "Blocked" section.
+
+The backlog's marks are evidence, not a verdict. A label can be stale: an
+item marked blocked whose blocker is gone is buildable, and an item marked
+ready whose code already merged is done. When the marks and the other
+evidence disagree, follow the evidence and say so in the reason.
+
+Write a reason the user can check without opening the item: name the pull
+request that shipped it, the thing it waits on, or the items it tracks.
+
+An unclear item is not left out. It is buildable with a `question`, see
+"Unclear items". Only use `blocked` for an owner decision when the item
+itself says the decision is the owner's.
+
+Items that `L status` lists under "Set aside" stay out of the plan and out of
+`left_out`, unless the user said what they needed has been supplied.
 
 Run `L status` before you plan again. Keep the name and content of a batch
 that has not changed, so that the names the user knows stay valid. Merged
@@ -149,6 +180,11 @@ the plan and names every problem.
 {
   "source": "file",
   "backlog": "BACKLOG.md",
+  "read": 6,
+  "left_out": [
+    {"id": "008", "title": "Send the receipt email", "category": "done", "reason": "Shipped in #41; only the provider's domain check is left."},
+    {"id": "030", "title": "Checkout epic", "category": "not-an-item", "reason": "Tracks 012, 015, 021 and 029."}
+  ],
   "batches": [
     {
       "name": "A",
@@ -177,6 +213,8 @@ the plan and names every problem.
 |---|---|---|
 | `source` | yes | `github` or `file`. With `file`, each batch's pull request also marks its items in the backlog file. |
 | `backlog` | for `file` | Path of the backlog file. Default `BACKLOG.md`. |
+| `read` | yes | How many open items you read. At least the number of items the plan names. |
+| `left_out` | no | The items you read and did not plan. Each has `id`, `title`, `category` (`done`, `blocked` or `not-an-item`) and `reason`. No item is both in a batch and left out. |
 | `batches[].name` | yes | Letters, digits, dot, dash, underscore. Unique, and not the name of a merged batch. |
 | `batches[].theme` | yes | A few words. Shown in the plan and the report. |
 | `batches[].title` | no | The pull request title, in the repository's commit convention: a squash merge uses it as the commit subject. Defaults to the theme. |
@@ -186,6 +224,10 @@ the plan and names every problem.
 | `items[].id`, `items[].title` | yes | The id as the backlog writes it; an issue number for `github`. Each item is in exactly one batch. |
 | `items[].question` | no | Marks the item unclear, with the one question to research. |
 
+`batches` may be empty when nothing is buildable. The report then says so
+and lists what was left out.
+
 A plan replaces every batch that has not started. Merged batches and batches
 that wait for the user's merge stay as they are. An item that was set aside
-returns only when the new plan names it.
+returns only when the new plan names it. The `left_out` list is replaced as a
+whole.

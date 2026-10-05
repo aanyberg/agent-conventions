@@ -22,6 +22,7 @@ Each was confirmed by the owner before the rewrite.
 | Low research confidence sets the item aside. It is not built. | "If something is still not clear, put the item to the side." A guess that merges costs a revert. |
 | A red base branch after a merge: open the revert pull request, halt, leave the merge of the revert to the user. | No more work lands on a red base, and an unattended revert merge is avoided. |
 | The planner reads the backlog; the script never parses it. With a file source a worker marks the items in the batch's own pull request. | Backlog files differ per repository (wide tables, archive and blocked sections). An agent follows the file's conventions; an awk parser could not. |
+| The planner reads every open item and classifies it itself: buildable, done, blocked or not a work item. There is no `label` setting. The plan stores what it left out, with reasons, and the report shows it. | A label filter hid most of a backlog from the planner, and an empty plan gave no hint why. Triage labels go stale; they count as evidence next to the item's text and the Git history. |
 | No compatibility with the first version's state or configuration keys. | A rewrite; `state.json` carries `version: 3` and older state is refused with a message. |
 
 Not carried over from the first version: `--plan-only` (now `plan`),

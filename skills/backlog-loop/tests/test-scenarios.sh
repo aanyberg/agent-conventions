@@ -24,7 +24,7 @@ plan_of() {
     batches="$batches${batches:+,}$1"
     shift
   done
-  printf '{"source":"%s","backlog":"BACKLOG.md","batches":[%s]}' "$source" "$batches"
+  printf '{"source":"%s","backlog":"BACKLOG.md","read":99,"batches":[%s]}' "$source" "$batches"
 }
 batch_field() { sget --arg b "$1" ".batches[] | select(.name == \$b) | $2"; }
 on_main() { git fetch -q origin main && git cat-file -e "origin/main:$1" 2>/dev/null; }
@@ -55,11 +55,11 @@ assert_contains "a bare batch name points to execute" "/backlog-loop execute D" 
 "$L" start --session s1 plan >/dev/null
 next
 assert_eq "plan asks for a plan" "plan" "$ACT"
-out="$(plan '{"source":"github","batches":[{"name":"A","theme":"x","items":[{"id":"1","title":"t"}]},{"name":"A","theme":"y","items":[{"id":"2","title":"t"}]}]}' 2>&1)"
+out="$(plan '{"source":"github","read":9,"batches":[{"name":"A","theme":"x","items":[{"id":"1","title":"t"}]},{"name":"A","theme":"y","items":[{"id":"2","title":"t"}]}]}' 2>&1)"
 assert_contains "a duplicate batch name is rejected" "more than once" "$out"
-out="$(plan '{"source":"github","batches":[{"name":"B","theme":"x","needs":["Z"],"items":[{"id":"1","title":"t"}]}]}' 2>&1)"
+out="$(plan '{"source":"github","read":9,"batches":[{"name":"B","theme":"x","needs":["Z"],"items":[{"id":"1","title":"t"}]}]}' 2>&1)"
 assert_contains "an unknown needed batch is rejected" "needs" "$out"
-out="$(plan '{"source":"github","batches":[{"name":"B","theme":"x","items":[{"id":"1","title":"t"}]},{"name":"C","theme":"x","items":[{"id":"1","title":"t"}]}]}' 2>&1)"
+out="$(plan '{"source":"github","read":9,"batches":[{"name":"B","theme":"x","items":[{"id":"1","title":"t"}]},{"name":"C","theme":"x","items":[{"id":"1","title":"t"}]}]}' 2>&1)"
 assert_contains "an item in two batches is rejected" "more than one batch" "$out"
 plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
 assert_eq "batch names are stored" "A" "$(sget '.batches[0].name')"
@@ -74,11 +74,51 @@ assert_eq "execute starts the work" "implement" "$ACT"
 new_repo
 assert_contains "before any plan the report says so" "no plan yet" "$("$L" status)"
 "$L" start --session s1 plan >/dev/null
-out="$(plan '{"source":"github","batches":[]}')"
+out="$(plan '{"source":"github","read":9,"batches":[]}')"
 assert_contains "an empty plan is reported as nothing to do" "nothing to do" "$out"
 assert_lacks "and not as a missing plan" "no plan yet" "$out"
 next
 assert_eq "the run ends" "done" "$ACT"
+
+echo "2b. the plan says what was read and what was left out"
+new_repo
+"$L" start --session s1 plan >/dev/null
+left='[{"id":"7","title":"Reconcile invoices","category":"done","reason":"shipped in #9, only an operator run is left"},{"id":"8","title":"Rotate the key","category":"blocked","reason":"needs the production credentials"},{"id":"9","title":"Billing epic","category":"not-an-item","reason":"an epic that only tracks other issues"}]'
+out="$(plan '{"source":"github","read":4,"batches":['"$(batch A '[]' 1)"'],"left_out":'"$left"'}')"
+assert_contains "the report says how many items were read and from where" "read 4 open items from GitHub issues" "$out"
+assert_contains "a left-out item is listed" "7: Reconcile invoices" "$out"
+assert_contains "with the reason" "Why: shipped in #9, only an operator run is left" "$out"
+assert_contains "items are grouped by why they were left out" "Blocked outside the repository" "$out"
+assert_contains "an issue that is not a work item is listed too" "9: Billing epic" "$out"
+assert_contains "status shows the left-out items later" "8: Rotate the key" "$("$L" status)"
+"$L" start --session s1 plan >/dev/null
+out="$(plan '{"source":"github","read":1,"batches":['"$(batch A '[]' 1)"']}')"
+assert_lacks "a new plan replaces the left-out list" "Reconcile invoices" "$out"
+
+new_repo
+"$L" start --session s1 plan >/dev/null
+out="$(plan '{"source":"github","read":2,"batches":[],"left_out":[{"id":"7","title":"Reconcile invoices","category":"done","reason":"shipped in #9"},{"id":"8","title":"Rotate the key","category":"blocked","reason":"needs credentials"}]}')"
+assert_contains "an empty plan is still nothing to do" "nothing to do" "$out"
+assert_contains "an empty plan says what was read" "read 2 open items from GitHub issues" "$out"
+assert_contains "an empty plan lists what it left out" "7: Reconcile invoices" "$out"
+
+new_repo "source: file" "path: BACKLOG.md"
+"$L" start --session s1 plan >/dev/null
+out="$(plan '{"source":"file","read":0,"batches":[]}')"
+assert_contains "a file backlog is named by its path" "read 0 open items from BACKLOG.md" "$out"
+
+new_repo
+"$L" start --session s1 plan >/dev/null
+out="$(plan '{"source":"github","batches":['"$(batch A '[]' 1)"']}' 2>&1)"
+assert_contains "a plan without the number of items read is rejected" "\"read\"" "$out"
+out="$(plan '{"source":"github","read":2,"batches":['"$(batch A '[]' 1)"'],"left_out":[{"id":"1","title":"Item 1","category":"done","reason":"x"}]}' 2>&1)"
+assert_contains "an item both planned and left out is rejected" "item 1 is in a batch and left out" "$out"
+out="$(plan '{"source":"github","read":2,"batches":['"$(batch A '[]' 1)"'],"left_out":[{"id":"7","title":"t","category":"done"}]}' 2>&1)"
+assert_contains "a left-out item without a reason is rejected" "left-out item 7 needs a reason" "$out"
+out="$(plan '{"source":"github","read":2,"batches":['"$(batch A '[]' 1)"'],"left_out":[{"id":"7","title":"t","category":"later","reason":"x"}]}' 2>&1)"
+assert_contains "an unknown category is rejected" "category must be done, blocked or not-an-item" "$out"
+out="$(plan '{"source":"github","read":1,"batches":['"$(batch A '[]' 1)"'],"left_out":[{"id":"7","title":"t","category":"done","reason":"x"}]}' 2>&1)"
+assert_contains "more items named than read is rejected" "names 2 items but read is 1" "$out"
 
 echo "3. Independent batches run in the same wave"
 new_repo
@@ -155,7 +195,7 @@ decision() {
     >".planning/backlog-loop/decisions/$1.md"
 }
 new_repo
-execute '{"source":"github","batches":[{"name":"A","theme":"x","items":[
+execute '{"source":"github","read":9,"batches":[{"name":"A","theme":"x","items":[
   {"id":"1","title":"Clear"},{"id":"2","title":"Unclear","question":"One line or two?"},{"id":"3","title":"Murky","question":"Which provider?"}]}]}'
 next
 assert_eq "research comes first" "research" "$ACT"
@@ -316,7 +356,7 @@ assert_eq "everything is merged" "merged merged" "$(sget '[.batches[].status] | 
 
 echo "12. The report: implemented, set aside, remaining"
 new_repo
-planned '{"source":"github","batches":[
+planned '{"source":"github","read":9,"batches":[
   {"name":"A","theme":"Forms","title":"feat(forms): validate","items":[{"id":"1","title":"Validate zip"},{"id":"2","title":"Needs keys"}]},
   {"name":"B","theme":"Checkout","items":[{"id":"3","title":"Show total"}]}]}'
 "$L" start --session s1 execute A >/dev/null

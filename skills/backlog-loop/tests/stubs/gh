@@ -1,123 +1,108 @@
 #!/usr/bin/env bash
-# Dry-run stub for the GitHub CLI. Keeps pull requests, issues and labels in
-# .planning/backlog-loop/dry-run/gh.json and performs merges on the local
-# refs/remotes/origin/* refs. CI results are read from the PR head commit:
-#   .ci-fail   in the tree: checks fail
-#   .ci-flaky  in the tree: checks fail until the run is rerun once
-#   .ci-hang   in the tree: checks stay pending
-#   .ci-fail-base in the tree: PR checks pass, CI on the base branch commit fails
-# shellcheck disable=SC2016
+# Test stub for the GitHub CLI. Pull requests live in $GH_STUB_DB (JSON); git
+# operations run against the bare repository $GH_STUB_ORIGIN, so merges and
+# branch updates are real. CI results come from marker files in a commit:
+#   .ci-fail       PR checks fail
+#   .ci-flaky      PR checks fail until the run is rerun once
+#   .ci-hang       PR checks stay pending
+#   .ci-none       no checks are reported
+#   .ci-fail-base  PR checks pass; CI on the base branch commit fails
+# The do_* functions run through in_clone.
+# shellcheck disable=SC2016,SC2317,SC2329
 set -u
-GIT="${BACKLOG_LOOP_REAL_GIT:-git}"
-root="${BACKLOG_LOOP_ROOT:-}"
-if [ -z "$root" ]; then
-  top="$("$GIT" rev-parse --show-toplevel 2>/dev/null)" || { echo "gh stub: not a git repository" >&2; exit 1; }
-  common="$("$GIT" -C "$top" rev-parse --git-common-dir)"
-  case "$common" in /*) ;; *) common="$top/$common" ;; esac
-  root="$(cd "$common/.." && pwd -P)"
-fi
-DB="$root/.planning/backlog-loop/dry-run/gh.json"
-[ -f "$DB" ] || { echo "gh stub: no fixture at $DB" >&2; exit 1; }
-g() { "$GIT" -C "$root" "$@"; }
+DB="${GH_STUB_DB:?gh stub: GH_STUB_DB is not set}"
+ORIGIN="${GH_STUB_ORIGIN:?gh stub: GH_STUB_ORIGIN is not set}"
+[ -f "$DB" ] || { echo "gh stub: no database at $DB" >&2; exit 1; }
 
+og() { git --git-dir="$ORIGIN" "$@"; }
 db() { jq "$@" "$DB"; }
-save() {
-  jq "$@" "$DB" >"$DB.tmp" && mv -f "$DB.tmp" "$DB"
-}
+save() { jq "$@" "$DB" >"$DB.tmp" && mv -f "$DB.tmp" "$DB"; }
+note() { save --arg l "$1" '.log += [$l]'; }
 
-# --- argument parsing ----------------------------------------------------------
 pos=()
-json=""
 jq_filter=""
-label=""
-state=""
 head=""
 base=""
 title=""
 body=""
-comment=""
-add_label=""
-branch=""
 method=""
-admin=0
-limit=500
+match=""
+commit=""
 while [ $# -gt 0 ]; do
   case "$1" in
-    --json) json="$2"; shift 2 ;;
     --jq | -q) jq_filter="$2"; shift 2 ;;
-    --label) label="$2"; shift 2 ;;
-    --state) state="$2"; shift 2 ;;
     --head) head="$2"; shift 2 ;;
     --base) base="$2"; shift 2 ;;
     --title) title="$2"; shift 2 ;;
-    --body) body="$2"; shift 2 ;;
+    --body | --comment) body="$2"; shift 2 ;;
     --body-file) body="$(cat "$2")"; shift 2 ;;
-    --comment) comment="$2"; shift 2 ;;
-    --add-label) add_label="$2"; shift 2 ;;
-    --branch) branch="$2"; shift 2 ;;
-    --limit) limit="$2"; shift 2 ;;
-    --reason | --description | --color | --match-head-commit) shift 2 ;;
+    --match-head-commit) match="$2"; shift 2 ;;
+    --commit) commit="$2"; shift 2 ;;
+    --json | --limit | --status) shift 2 ;;
     --squash | --merge | --rebase) method="${1#--}"; shift ;;
-    --admin) admin=1; shift ;;
     -*) shift ;;
     *) pos+=("$1"); shift ;;
   esac
 done
-: "$json" "$admin" "$method"
 
-out() {
-  # Print JSON from stdin, through --jq when given.
-  if [ -n "$jq_filter" ]; then jq -r "$jq_filter"; else cat; fi
-}
+out() { if [ -n "$jq_filter" ]; then jq -r "$jq_filter"; else cat; fi; }
+field() { db -r --argjson n "$1" ".prs[] | select(.number == \$n) | $2"; }
+exists() { [ -n "$(field "$1" .number 2>/dev/null)" ]; }
+head_sha() { og rev-parse -q --verify "refs/heads/$(field "$1" .head)" 2>/dev/null; }
+has() { og cat-file -e "$1:$2" 2>/dev/null; }
 
-pr_number() {
-  # Resolve a selector (number, URL, branch, or nothing for the current branch).
-  local sel="${1:-}"
-  case "$sel" in
-    "") sel="$("$GIT" rev-parse --abbrev-ref HEAD 2>/dev/null)" ;;
-    */pull/*) sel="${sel##*/}" ;;
-  esac
-  case "$sel" in
-    *[!0-9]*) db -r --arg h "$sel" '[.prs[] | select(.head == $h)] | last | .number // empty' ;;
-    *) db -r --argjson n "$sel" '.prs[] | select(.number == $n) | .number' ;;
-  esac
-}
-
-pr_field() { db -r --argjson n "$1" ".prs[] | select(.number == \$n) | $2"; }
-
-head_sha() { g rev-parse --verify -q "refs/remotes/origin/$(pr_field "$1" .head)"; }
-
-check_bucket() {
-  # check_bucket <pr>: pass | fail | pending, from the head commit's tree.
-  local n="$1" sha polls need
-  sha="$(head_sha "$n")"
-  [ -n "$sha" ] || { echo pending; return; }
+bucket() {
+  # bucket <sha>: none | pending | fail | pass
+  local sha="$1" polls need
+  [ -n "$sha" ] || { echo none; return; }
+  if has "$sha" .ci-none; then echo none; return; fi
   polls="$(db -r --arg s "$sha" '.polls[$s] // 0')"
-  need="$(db -r '.ci.pending_polls // 1')"
+  need="$(db -r '.pending_polls // 0')"
   save --arg s "$sha" '.polls[$s] = ((.polls[$s] // 0) + 1)'
-  if g cat-file -e "$sha:.ci-hang" 2>/dev/null || [ "$polls" -lt "$need" ]; then
+  if has "$sha" .ci-hang || [ "$polls" -lt "$need" ]; then
     echo pending
-  elif g cat-file -e "$sha:.ci-fail" 2>/dev/null; then
+  elif has "$sha" .ci-fail; then
     echo fail
-  elif g cat-file -e "$sha:.ci-flaky" 2>/dev/null && [ "$(db -r --arg s "$sha" '.reruns[$s] // false')" != "true" ]; then
+  elif has "$sha" .ci-flaky && [ "$(db -r --arg s "$sha" '.reruns[$s] // false')" != "true" ]; then
     echo fail
   else
     echo pass
   fi
 }
 
-# with_worktree <ref> <command...>: run a command in a temporary detached worktree.
-with_worktree() {
-  local ref="$1" wt rc
-  shift
-  wt="$(mktemp -d "${TMPDIR:-/tmp}/gh-stub.XXXXXX")"
-  rmdir "$wt"
-  g worktree add -q --detach "$wt" "$ref" >/dev/null 2>&1 || return 1
-  (cd "$wt" && "$@")
+# in_clone <command...>: run a command in a throwaway clone of the origin.
+in_clone() {
+  local tmp rc
+  tmp="$(mktemp -d "${TMPDIR:-/tmp}/gh-stub.XXXXXX")"
+  git clone -q "$ORIGIN" "$tmp/c" 2>/dev/null || { rm -rf "$tmp"; return 1; }
+  (
+    cd "$tmp/c" || exit 1
+    git config user.email stub@example.com
+    git config user.name "gh stub"
+    git config commit.gpgsign false
+    "$@"
+  )
   rc=$?
-  if [ "$rc" -eq 0 ]; then STUB_SHA="$("$GIT" -C "$wt" rev-parse HEAD)"; fi
-  g worktree remove --force "$wt" >/dev/null 2>&1
+  rm -rf "$tmp"
   return "$rc"
+}
+
+do_merge() {
+  # do_merge <base> <head> <message>
+  git checkout -q "$1" && git merge -q --squash "origin/$2" >/dev/null 2>&1 &&
+    git commit -q -m "$3" && git push -q origin "$1" 2>/dev/null
+}
+
+do_update() {
+  # do_update <base> <head>
+  git checkout -q "$2" && git merge -q --no-edit "origin/$1" >/dev/null 2>&1 &&
+    git push -q origin "$2" 2>/dev/null
+}
+
+do_revert() {
+  # do_revert <base> <sha> <branch>
+  git checkout -q -b "$3" "origin/$1" && git revert --no-edit "$2" >/dev/null 2>&1 &&
+    git push -q origin "$3" 2>/dev/null
 }
 
 group="${pos[0]:-}"
@@ -126,7 +111,7 @@ arg="${pos[2]:-}"
 
 case "$group $cmd" in
   "auth status")
-    printf "github.com\n  Logged in to github.com account dry-run\n  - Token scopes: 'repo', 'workflow'\n"
+    echo "Logged in to github.com account stub"
     ;;
 
   "repo view")
@@ -135,163 +120,124 @@ case "$group $cmd" in
 
   "api "*)
     case "$cmd" in
-      */rules/branches/*) db '.rules // []' | out ;;
-      */protection) db -e '.protection // empty' | out || exit 1 ;;
-      */check-runs)
-        # The commit's CI result, read from its tree like a PR's checks.
+      */commits/*/check-runs)
         sha="${cmd%/check-runs}"
         sha="${sha##*/}"
-        conclusion="success"
-        if g cat-file -e "$sha:.ci-fail" 2>/dev/null || g cat-file -e "$sha:.ci-fail-base" 2>/dev/null; then
-          conclusion="failure"
+        if has "$sha" .ci-fail-base; then
+          echo '{"check_runs":[{"name":"test","status":"completed","conclusion":"failure"}]}' | out
+        else
+          echo '{"check_runs":[{"name":"test","status":"completed","conclusion":"success"}]}' | out
         fi
-        jq -n --arg c "$conclusion" '{total_count: 1, check_runs: [{name: "ci", status: "completed", conclusion: $c}]}' | out
         ;;
-      */status) echo '{"statuses":[]}' | out ;;
-      *) echo "gh stub: unsupported api path $cmd" >&2; exit 1 ;;
+      *) echo "gh stub: unsupported api call $cmd" >&2; exit 1 ;;
     esac
     ;;
 
-  "label create")
-    save --arg l "$arg" '.labels = ((.labels // []) + [$l] | unique)'
-    ;;
-
-  "issue list")
-    db --arg l "$label" '[.issues[] | select(.state == "OPEN") | select($l == "" or (.labels | index($l)))
-      | {number, title, url: "https://github.com/example/fixture/issues/\(.number)", labels: [.labels[] | {name: .}]}]
-      | .[:$n]' --argjson n "$limit" | out
-    ;;
-
-  "issue view")
-    db --argjson n "$arg" '.issues[] | select(.number == $n)' | out
-    ;;
-
-  "issue comment")
-    save --argjson n "$arg" --arg b "$body" '.issues |= map(if .number == $n then .comments += [$b] else . end)'
-    ;;
-
-  "issue edit")
-    save --argjson n "$arg" --arg l "$add_label" '.issues |= map(if .number == $n and $l != "" then .labels = (.labels + [$l] | unique) else . end)'
-    ;;
-
-  "issue close")
-    save --argjson n "$arg" --arg c "$comment" '.issues |= map(if .number == $n then .state = "CLOSED" | (if $c != "" then .comments += [$c] else . end) else . end)'
-    ;;
-
   "pr create")
-    [ -n "$(g rev-parse --verify -q "refs/remotes/origin/$head")" ] || { echo "gh stub: head branch $head was not pushed" >&2; exit 1; }
-    n="$(db -r '.next_pr')"
-    save --argjson n "$n" --arg h "$head" --arg b "$base" --arg t "$title" --arg body "$body" '
-      .next_pr += 1 | .prs += [{number: $n, head: $h, base: $b, title: $t, body: $body, state: "OPEN", merge_commit: null}]'
+    if [ -z "$head" ] || [ -z "$base" ]; then echo "gh stub: pr create needs --head and --base" >&2; exit 1; fi
+    og rev-parse -q --verify "refs/heads/$head" >/dev/null || { echo "gh stub: head branch $head is not on the remote" >&2; exit 1; }
+    n="$(db -r '.next')"
+    save --argjson n "$n" --arg h "$head" --arg b "$base" --arg t "$title" --arg body "$body" \
+      '.next += 1 | .prs += [{number: $n, head: $h, base: $b, title: $t, body: $body, state: "OPEN", mergeCommit: null}]'
+    note "create $n $head"
     echo "https://github.com/example/fixture/pull/$n"
     ;;
 
-  "pr list")
-    db --arg h "$head" --arg s "$(printf '%s' "${state:-open}" | tr '[:lower:]' '[:upper:]')" '
-      [.prs[] | select(($h == "" or .head == $h) and ($s == "ALL" or .state == $s)) | {number, headRefName: .head, state}]' | out
-    ;;
-
   "pr view")
-    n="$(pr_number "$arg")"
-    [ -n "$n" ] || { echo "gh stub: no pull request found for ${arg:-the current branch}" >&2; exit 1; }
-    sha="$(head_sha "$n" || true)"
+    exists "$arg" || { echo "gh stub: no pull request $arg" >&2; exit 1; }
+    sha="$(head_sha "$arg")"
     mergeable="MERGEABLE"
-    if [ "$(pr_field "$n" .state)" = "OPEN" ] && [ -n "$sha" ]; then
-      g merge-tree --write-tree "refs/remotes/origin/$(pr_field "$n" .base)" "$sha" >/dev/null 2>&1 || mergeable="CONFLICTING"
+    if [ "$(field "$arg" .state)" = "OPEN" ] && [ -n "$sha" ]; then
+      og merge-tree --write-tree "refs/heads/$(field "$arg" .base)" "$sha" >/dev/null 2>&1 || mergeable="CONFLICTING"
     fi
-    db --argjson n "$n" --arg sha "$sha" --arg m "$mergeable" '.prs[] | select(.number == $n)
-      | {number, state, title, body, headRefName: .head, baseRefName: .base, headRefOid: $sha, mergeable: $m,
-         mergeCommit: (if .merge_commit then {oid: .merge_commit} else null end),
-         url: "https://github.com/example/fixture/pull/\(.number)"}' | out
+    db --argjson n "$arg" --arg sha "$sha" --arg m "$mergeable" '.prs[] | select(.number == $n) |
+      {number, state, title, body, mergeable: $m, headRefOid: $sha, headRefName: .head, baseRefName: .base,
+       mergeCommit: (if .mergeCommit then {oid: .mergeCommit} else null end),
+       url: "https://github.com/example/fixture/pull/\(.number)"}' | out
     ;;
 
   "pr checks")
-    n="$(pr_number "$arg")"
-    [ -n "$n" ] || { echo "gh stub: no pull request found" >&2; exit 1; }
-    if [ "$(db -r '.ci.none // false')" = "true" ]; then
-      echo "no checks reported on the '$(pr_field "$n" .head)' branch" >&2
+    exists "$arg" || { echo "gh stub: no pull request $arg" >&2; exit 1; }
+    b="$(bucket "$(head_sha "$arg")")"
+    if [ "$b" = "none" ]; then
+      echo "no checks reported on the '$(field "$arg" .head)' branch" >&2
       exit 1
     fi
-    bucket="$(check_bucket "$n")"
-    jq -n --arg b "$bucket" '[{name: "ci", bucket: $b, state: $b}]' | out
+    jq -n --arg b "$b" '[{name: "test", bucket: $b}]' | out
+    case "$b" in pending) exit 8 ;; fail) exit 1 ;; esac
     ;;
 
   "pr merge")
-    n="$(pr_number "$arg")"
-    [ -n "$n" ] || { echo "gh stub: no pull request found" >&2; exit 1; }
-    [ "$(pr_field "$n" .state)" = "OPEN" ] || { echo "gh stub: PR #$n is not open" >&2; exit 1; }
-    pr_base="$(pr_field "$n" .base)"
-    pr_head="$(pr_field "$n" .head)"
-    STUB_SHA=""
-    with_worktree "refs/remotes/origin/$pr_base" sh -c "
-      '$GIT' merge -q --squash 'refs/remotes/origin/$pr_head' >/dev/null 2>&1 &&
-      '$GIT' commit -q -m \"\$1 (#$n)\"" sh "$(pr_field "$n" .title)" ||
-      { echo "gh stub: PR #$n is not mergeable: merge conflict" >&2; exit 1; }
-    g update-ref "refs/remotes/origin/$pr_base" "$STUB_SHA"
-    save --argjson n "$n" --arg c "$STUB_SHA" '.prs |= map(if .number == $n then .state = "MERGED" | .merge_commit = $c else . end)'
-    # Merging closes the issues the body names with "Closes #n".
-    for issue in $(pr_field "$n" .body | sed -n 's/.*[Cc]loses #\([0-9][0-9]*\).*/\1/p'); do
-      save --argjson i "$issue" '.issues |= map(if .number == $i then .state = "CLOSED" else . end)'
-    done
-    echo "Merged pull request #$n"
-    ;;
-
-  "pr close")
-    n="$(pr_number "$arg")"
-    [ -n "$n" ] || exit 1
-    save --argjson n "$n" '.prs |= map(if .number == $n then .state = "CLOSED" else . end)'
+    exists "$arg" || { echo "gh stub: no pull request $arg" >&2; exit 1; }
+    [ "$(field "$arg" .state)" = "OPEN" ] || { echo "gh stub: pull request $arg is not open" >&2; exit 1; }
+    sha="$(head_sha "$arg")"
+    if [ -n "$match" ] && [ "$match" != "$sha" ]; then
+      echo "gh stub: head commit does not match" >&2
+      exit 1
+    fi
+    if [ "$(db -r '.refuse_merge // false')" = "true" ]; then
+      echo "gh stub: merge refused by branch rules" >&2
+      exit 1
+    fi
+    b="$(field "$arg" .base)"
+    in_clone do_merge "$b" "$(field "$arg" .head)" "$(field "$arg" .title) (#$arg)" || { echo "gh stub: merge failed" >&2; exit 1; }
+    save --argjson n "$arg" --arg sha "$(og rev-parse "refs/heads/$b")" \
+      '(.prs[] | select(.number == $n)) |= (.state = "MERGED" | .mergeCommit = $sha)'
+    note "merge $arg ${method:-default} $(bucket "$sha")"
     ;;
 
   "pr update-branch")
-    n="$(pr_number "$arg")"
-    [ -n "$n" ] || exit 1
-    pr_base="$(pr_field "$n" .base)"
-    pr_head="$(pr_field "$n" .head)"
-    STUB_SHA=""
-    with_worktree "refs/remotes/origin/$pr_head" "$GIT" merge -q --no-edit "refs/remotes/origin/$pr_base" >/dev/null 2>&1 ||
-      { echo "gh stub: cannot update PR #$n: merge conflict" >&2; exit 1; }
-    g update-ref "refs/remotes/origin/$pr_head" "$STUB_SHA"
+    exists "$arg" || { echo "gh stub: no pull request $arg" >&2; exit 1; }
+    note "update-branch $arg"
+    in_clone do_update "$(field "$arg" .base)" "$(field "$arg" .head)" || { echo "gh stub: update-branch hit a conflict" >&2; exit 1; }
     ;;
 
   "pr revert")
-    n="$(pr_number "$arg")"
-    [ -n "$n" ] || exit 1
-    pr_base="$(pr_field "$n" .base)"
-    STUB_SHA=""
-    with_worktree "refs/remotes/origin/$pr_base" "$GIT" revert --no-edit "$(pr_field "$n" .merge_commit)" >/dev/null 2>&1 ||
-      { echo "gh stub: could not revert PR #$n" >&2; exit 1; }
-    g update-ref "refs/remotes/origin/revert-$n" "$STUB_SHA"
-    new="$(db -r '.next_pr')"
-    save --argjson n "$new" --arg h "revert-$n" --arg b "$pr_base" --arg t "${title:-Revert #$n}" '
-      .next_pr += 1 | .prs += [{number: $n, head: $h, base: $b, title: $t, body: "", state: "OPEN", merge_commit: null}]'
-    echo "https://github.com/example/fixture/pull/$new"
+    exists "$arg" || { echo "gh stub: no pull request $arg" >&2; exit 1; }
+    n="$(db -r '.next')"
+    in_clone do_revert "$(field "$arg" .base)" "$(field "$arg" .mergeCommit)" "revert-$arg" || { echo "gh stub: revert failed" >&2; exit 1; }
+    save --argjson n "$n" --arg h "revert-$arg" --arg b "$(field "$arg" .base)" --arg t "Revert #$arg" \
+      '.next += 1 | .prs += [{number: $n, head: $h, base: $b, title: $t, body: "", state: "OPEN", mergeCommit: null}]'
+    note "revert $arg"
+    echo "https://github.com/example/fixture/pull/$n"
+    ;;
+
+  "pr edit")
+    exists "$arg" || { echo "gh stub: no pull request $arg" >&2; exit 1; }
+    save --argjson n "$arg" --arg body "$body" '(.prs[] | select(.number == $n)) |= (.body = $body)'
+    note "edit $arg"
+    ;;
+
+  "pr close")
+    save --argjson n "$arg" '(.prs[] | select(.number == $n)) |= (.state = "CLOSED")'
+    note "close $arg"
+    ;;
+
+  "pr comment" | "issue comment")
+    note "comment $group $arg: $body"
     ;;
 
   "run list")
-    sha="$(g rev-parse --verify -q "refs/remotes/origin/$branch" || true)"
-    conclusion="success"
-    if [ -n "$sha" ]; then
-      if g cat-file -e "$sha:.ci-fail" 2>/dev/null; then conclusion="failure"; fi
-      if g cat-file -e "$sha:.ci-flaky" 2>/dev/null && [ "$(db -r --arg s "$sha" '.reruns[$s] // false')" != "true" ]; then conclusion="failure"; fi
+    b="$(bucket "$commit")"
+    if [ "$b" = "fail" ]; then
+      id="$(db -r '(.runs | length) + 1')"
+      save --arg id "$id" --arg s "$commit" '.runs[$id] = $s'
+      jq -n --argjson id "$id" '[{databaseId: $id, conclusion: "failure"}]' | out
+    else
+      echo '[]' | out
     fi
-    jq -n --arg s "$sha" --arg c "$conclusion" '[{databaseId: 9001, headSha: $s, conclusion: $c, status: "completed"}]' | out
     ;;
 
   "run rerun")
-    # Reruns apply to every open PR head: the stub has one run per head.
-    for sha in $(db -r '.prs[] | select(.state == "OPEN") | .head' | while IFS= read -r h; do g rev-parse --verify -q "refs/remotes/origin/$h" || true; done); do
-      save --arg s "$sha" '.reruns[$s] = true | .polls[$s] = 0'
-    done
+    sha="$(db -r --arg id "$arg" '.runs[$id] // empty')"
+    [ -n "$sha" ] || { echo "gh stub: no run $arg" >&2; exit 1; }
+    save --arg s "$sha" '.reruns[$s] = true'
+    note "rerun $sha"
     ;;
-
-  "run view")
-    echo "ci  simulated failure: marker file .ci-fail is present in the tree"
-    ;;
-
-  "run cancel") ;;
 
   *)
     echo "gh stub: unsupported command: ${pos[*]:-}" >&2
     exit 1
     ;;
 esac
+exit 0

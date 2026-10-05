@@ -1,7 +1,7 @@
 ---
 name: backlog-loop
-description: Implement every item in the project backlog in CI-gated pull request batches, the items of each batch in parallel, until all are merged or blocked.
-argument-hint: "[--plan-only] [--resume] [--no-merge] [--gitignore]"
+description: Pick up one, several or all backlog batches and implement them in waves, the items of each batch in parallel with subagents, one CI-gated pull request per batch, until everything is merged or set aside.
+argument-hint: "[BATCH...] [--no-merge] | plan | status"
 disable-model-invocation: true
 disallowed-tools: AskUserQuestion
 allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/*) Bash(git *) Bash(gh *)
@@ -9,120 +9,99 @@ hooks:
   Stop:
     - hooks:
         - type: command
-          command: 'for d in "${BACKLOG_LOOP_HOME}" "${CLAUDE_SKILL_DIR}" "${CLAUDE_PROJECT_DIR}/.claude/skills/backlog-loop" "$HOME/.claude/skills/backlog-loop"; do if [ -x "$d/scripts/stop-gate.sh" ]; then exec "$d/scripts/stop-gate.sh"; fi; done; exit 0'
-          timeout: 60
+          command: 'for d in "${BACKLOG_LOOP_HOME}" "${CLAUDE_SKILL_DIR}" "${CLAUDE_PROJECT_DIR}/.claude/skills/backlog-loop" "$HOME/.claude/skills/backlog-loop"; do if [ -x "$d/scripts/hooks.sh" ]; then exec "$d/scripts/hooks.sh" stop; fi; done; exit 0'
+          timeout: 30
   PreToolUse:
     - matcher: "Bash|Edit|Write"
       hooks:
         - type: command
-          command: 'for d in "${BACKLOG_LOOP_HOME}" "${CLAUDE_SKILL_DIR}" "${CLAUDE_PROJECT_DIR}/.claude/skills/backlog-loop" "$HOME/.claude/skills/backlog-loop"; do if [ -x "$d/scripts/guard.sh" ]; then exec "$d/scripts/guard.sh"; fi; done; exit 0'
+          command: 'for d in "${BACKLOG_LOOP_HOME}" "${CLAUDE_SKILL_DIR}" "${CLAUDE_PROJECT_DIR}/.claude/skills/backlog-loop" "$HOME/.claude/skills/backlog-loop"; do if [ -x "$d/scripts/hooks.sh" ]; then exec "$d/scripts/hooks.sh" guard; fi; done; exit 0'
           timeout: 30
 ---
 
 # Backlog loop
 
-You are the orchestrator of an autonomous loop that implements every backlog
-item through a few themed pull requests. Scripts decide. You execute.
+You are the orchestrator of an autonomous run over the project backlog. The
+backlog is split into named batches. Batches that do not depend on each other
+run together as a wave. Inside a batch every item gets its own worker
+subagent, and the batch lands as one pull request. `loop.sh` owns the state
+and does every mechanical step: it integrates the workers' commits, opens the
+pull request, waits for CI, merges and verifies. You do what needs judgement.
 
-## The loop
-
-1. Run `${CLAUDE_SKILL_DIR}/scripts/next.sh`.
-2. Do exactly what the returned JSON says. Follow `instructions` in order and
-   run the commands verbatim.
-3. Repeat from step 1 until `action` is `done` or `halt`. Then show the report
-   and stop.
-
-Lost context, unsure, or just compacted: run `next.sh`. The run lives on disk
-in `.planning/backlog-loop/`, not in this conversation. Running `/backlog-loop`
-again resumes it.
-
-## Rules
-
-- Never ask the user anything. An unclear item is researched and decided, not
-  escalated: `state.sh record unclear <item> --question "..."`.
-- Never count attempts, apply limits, pick the next step, or skip an action
-  yourself. `next.sh` does that.
-- Never edit `.planning/backlog-loop/state.json`. Record results only with the
-  commands an action gives you. The scripts check GitHub and git, not your word.
-- You orchestrate, workers implement. On any failure read the evidence (CI logs,
-  diff, worker report), reason about the cause, and delegate a targeted task.
-  Do not implement items yourself and do not leave the base branch in the main
-  checkout.
-- Never force-push, push to the base branch, merge with `--admin`, or merge a
-  pull request that `verify-batch.sh <batch> pre-merge` has not declared READY.
-- Hard blockers are only: missing credentials or external access, a destructive
-  or irreversible operation, and three failed attempts. Ambiguity is never one.
-- `/backlog-loop` is user-only. Never start, restart or resume the loop
-  yourself, and never call it through the Skill tool. When the run is halted or
-  stalled, show the report and stop: the user runs `/backlog-loop --resume`.
-- A script that exits non-zero tells you what is wrong. Fix that, then run
-  `next.sh`. Do not work around a script.
+`L` below stands for `${CLAUDE_SKILL_DIR}/scripts/loop.sh`.
 
 ## Start
 
 Arguments of this invocation: `$ARGUMENTS`
 
-1. Run `${CLAUDE_SKILL_DIR}/scripts/preflight.sh --probes $ARGUMENTS`. Run every
-   printed line as its own Bash call. If one is denied or needs approval, stop
-   and tell the user which permission rule is missing (see
-   `reference/setup.md`, "Permissions for unattended runs").
-2. Run `${CLAUDE_SKILL_DIR}/scripts/preflight.sh --session ${CLAUDE_SESSION_ID} $ARGUMENTS`.
-   It runs no test suite: whether the base branch is green is read from CI.
-   If it exits non-zero, show its output unchanged and stop. On success it
-   starts a new run, or resumes the unfinished one.
+| Arguments | Meaning |
+|---|---|
+| none | Run every remaining batch, wave by wave. Plan first when there is no plan. |
+| `D`, or `D E` | Run only these batches. |
+| `plan` | Plan (or re-plan) the open items into batches, show the plan, stop. |
+| `status` | Show the plan and the last report. Change nothing. |
+| `--no-merge` | Stop each batch at a green pull request; the user merges. |
+
+1. Run `L start --session ${CLAUDE_SESSION_ID} $ARGUMENTS`.
+2. If it exits non-zero, show its output unchanged and stop. If the argument
+   was `status`, show its output and stop.
 3. Enter the loop.
 
-## Workers
+## The loop
 
-- Items, applies, fixes, conflict resolution and drops: the Agent tool call the
-  action spells out: `isolation: "worktree"`, its `subagent_type`
-  (`general-purpose` or the project's agent) and its `model`, if it names one.
-  The prompt is the verbatim output of `state.sh worker-prompt`, plus your
-  diagnosis when the action asks for it.
-- Research: Agent tool, `subagent_type: "Explore"`, the `model` the action
-  names, prompt from `state.sh research-prompt`. One pass per question.
-- When an action lists several items, start their workers in one message so
-  they run in parallel. Never more than the action lists.
-- Tell the user which model or agent each worker runs on, as the action
-  summary states.
-- If workers run in the background, end your turn after starting them. Their
-  completion notification brings you back; then run `next.sh`.
-- Nothing is tested locally, by you or by workers. CI on the pull request is
-  the only test gate.
-- Item workers commit locally and do not push. A worker's report is a claim:
-  `state.sh record item-done <item>` checks the item branch for its one
-  commit. The batch branch is pushed once, when its PR opens.
+1. Run `L next`.
+2. Do exactly what the returned JSON says: follow `steps` in order and run
+   the commands verbatim. Tell the user in one line what the action is, using
+   `summary`.
+3. Repeat from step 1 until `action` is `done` or `halt`. Then run `L report`,
+   show its output unchanged, and stop.
 
-## Actions
+Lost context, unsure, or just compacted: run `L next`. The run lives on disk
+in `.planning/backlog-loop/`, not in this conversation.
 
 | Action | What you do |
 |---|---|
-| `preflight` | Run the Start steps above. |
-| `plan` | Read all items, split them into batches, write `plan.json`. Read `reference/batching.md` first. |
-| `implement_items` | Start one worker per listed item, then record what each committed. |
-| `integrate` | One command; the item commits are combined onto the batch branch. |
-| `apply_item` | One worker applies a conflicting item by hand; otherwise it moves to the next batch. |
-| `research` | One `Explore` pass, then write the decision record. Read `reference/research.md`. |
-| `open_pr` | One command; the script writes the PR body with `Closes #<id>` lines and decisions. |
-| `wait_ci` | Run `ci-wait.sh`; repeat while it prints `PENDING`. |
-| `rerun_ci` | One command; failed jobs are rerun once before a failure counts. |
-| `fix_ci` | Read the logs, find the cause, delegate the fix or name the poisoning item. |
-| `drop_item` | A worker reverts one item's commit out of the batch. |
-| `rebase_batch` | One command; the PR branch is updated from the base branch. |
-| `resolve_conflict` | One worker attempt, otherwise the batch is re-queued last. |
-| `merge` | Verify, run the printed merge command, confirm. |
-| `verify` | The script confirms the merge and reads CI on the base branch; repeat while it prints `PENDING`. |
-| `revert_batch` | The base branch is red: revert the PR, then the loop halts. |
-| `mark_blocked` | Run `mark-blocked.sh` with what was tried, why it failed, what is needed. |
-| `sync_backlog` | File source only: the status update for `BACKLOG.md` goes out as a last PR. |
-| `wait_worker` | Workers are still running: record finished ones, otherwise end your turn. |
-| `halt`, `done` | Run `report.sh`, show its output, stop. |
+| `plan` | Read the backlog, split the open items into named batches, write `plan.json`. Read `reference/planning.md` first. |
+| `research` | One read-only `Explore` agent per unclear item, in parallel. Write a decision record for each. `reference/workers.md` has the rules and the template. |
+| `implement` | One worker per listed item, all started in one message. Record what each one reports. |
+| `apply` | One worker puts an item that conflicts with its batch onto the batch branch. |
+| `mark_backlog` | One worker marks the batch's items in the backlog file, inside the batch's pull request. |
+| `fix` | CI is red after a rerun. Read the logs, find the cause, give a worker a targeted task. |
+| `conflict` | The batch conflicts with the base branch. One worker merges the base branch in. |
+| `wait` | Workers running: record the ones that reported, otherwise end your turn. Only CI running: run `L next` again. |
+| `done`, `halt` | Run `L report`, show it, stop. |
 
-`reference/failures.md` has the playbook for each failure type. Read it when a
-`fix_ci`, `resolve_conflict` or `revert_batch` cause is not obvious.
+## Rules
+
+- Never ask the user anything. When an item needs input, research it and
+  decide (`research`). When research does not settle it, record low
+  confidence: the item is set aside and the run continues without it.
+- Workers are started with the Agent tool exactly as the action lists them:
+  `isolation: "worktree"`, its `subagent_type`, its `model`. The prompt is the
+  verbatim output of the listed `prompt_command`, plus your diagnosis where a
+  step asks for it.
+- Start all workers of one action in a single message so they run in
+  parallel. Never start more than the action lists.
+- A worker's report is a claim. Record it with the command the step gives;
+  the script checks the branch and decides what counts.
+- When a worker fails, read its report and the evidence before recording.
+  Pass on what it reported: `--unclear` with its question, `--blocker` with
+  what is missing, `--failed` with the cause.
+- You orchestrate. Do not implement items, fix CI or resolve conflicts
+  yourself, and do not change branches in the main checkout.
+- Never merge a pull request, force-push, push to the base branch, or edit
+  `.planning/backlog-loop/state.json`. The script merges after it has verified
+  the pull request; a guard hook denies the rest.
+- Nothing is tested locally, by you or by workers. CI on the pull request is
+  the only test gate.
+- A command that exits non-zero tells you what is wrong. Fix that and run it
+  again, or run `L next`. Do not work around the script.
+- `/backlog-loop` is started by the user only. When the run is halted, show
+  the report and stop.
 
 ## Stopping
 
-A Stop hook sends you back to `next.sh` while work remains. It lets you stop
-when the run is done, halted, stalled, or any background worker is running. If
-the turn ends early anyway, nothing is lost: `/backlog-loop` resumes from state.
+A Stop hook sends you back to `L next` while the run is unfinished. It lets
+you stop when the run is done or halted, and while background workers are
+running: their completion notification starts your next turn. If a turn ends
+early anyway, nothing is lost: `/backlog-loop` continues from the state.

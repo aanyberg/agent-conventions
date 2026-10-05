@@ -4,21 +4,20 @@
 
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$TESTS_DIR/.." && pwd)"
-S="$SKILL_DIR/scripts"
-FIXTURES="$TESTS_DIR/fixtures"
+L="$SKILL_DIR/scripts/loop.sh"
+H="$SKILL_DIR/scripts/hooks.sh"
 T_PASS=0
 T_FAIL=0
-T_TMP=""
+T_TMP="$(mktemp -d "${TMPDIR:-/tmp}/backlog-loop-test.XXXXXX")"
+T_TMP="$(cd "$T_TMP" && pwd -P)"
+T_N=0
+trap 'rm -rf "$T_TMP"' EXIT
 
-t_cleanup() {
-  if [ -n "$T_TMP" ] && [ -d "$T_TMP" ]; then rm -rf "$T_TMP"; fi
-}
-trap t_cleanup EXIT
-
-t_tmp() {
-  T_TMP="$(mktemp -d "${TMPDIR:-/tmp}/backlog-loop-test.XXXXXX")"
-  T_TMP="$(cd "$T_TMP" && pwd -P)"
-}
+PATH="$TESTS_DIR/stubs:$PATH"
+export PATH
+# No sleeping and no settle time in tests.
+export BACKLOG_LOOP_POLL_SECONDS=0 BACKLOG_LOOP_SLICE_SECONDS=0 BACKLOG_LOOP_SETTLE_SECONDS=0
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1
 
 ok() {
   T_PASS=$((T_PASS + 1))
@@ -40,12 +39,16 @@ assert_contains() {
   # assert_contains <name> <needle> <haystack>
   case "$3" in
     *"$2"*) ok "$1" ;;
-    *) not_ok "$1" "'$2' not found in: $(printf '%s' "$3" | head -c 300)" ;;
+    *) not_ok "$1" "'$2' not found in: $(printf '%s' "$3" | head -c 400)" ;;
   esac
 }
 
-assert_empty() {
-  if [ -z "$2" ]; then ok "$1"; else not_ok "$1" "expected no output, got: $(printf '%s' "$2" | head -c 300)"; fi
+assert_lacks() {
+  # assert_lacks <name> <needle> <haystack>
+  case "$3" in
+    *"$2"*) not_ok "$1" "'$2' found in: $(printf '%s' "$3" | head -c 400)" ;;
+    *) ok "$1" ;;
+  esac
 }
 
 t_summary() {
@@ -53,78 +56,148 @@ t_summary() {
   [ "$T_FAIL" -eq 0 ]
 }
 
-# A state directory without a git repository, for the pure state tests.
-# use_state <fixture.json> [jq filter to adjust it]
-use_state() {
-  [ -n "$T_TMP" ] || t_tmp
-  BACKLOG_LOOP_ROOT="$T_TMP/repo-$T_PASS-$T_FAIL-$RANDOM"
-  export BACKLOG_LOOP_ROOT
-  STATE_DIR="$BACKLOG_LOOP_ROOT/.planning/backlog-loop"
-  STATE="$STATE_DIR/state.json"
-  mkdir -p "$STATE_DIR/decisions"
-  jq "${2:-.}" "$FIXTURES/$1" >"$STATE"
-}
-
-sget() { jq -r "$1" "$STATE"; }
-
-# A real git repository with a five-item backlog, for the dry run.
-# make_fixture <dir> <github|file>
-make_fixture() {
-  local dir="$1" source="$2"
+# new_repo [config lines]: a repository with a bare origin and an empty gh
+# database. Leaves the shell inside the clone. Config lines go into the
+# "## Backlog loop" section of CLAUDE.md.
+new_repo() {
+  T_N=$((T_N + 1))
+  local dir="$T_TMP/case-$T_N"
   mkdir -p "$dir"
-  (
-    cd "$dir" || exit 1
-    git init -q -b main .
-    git config user.email "dry-run@example.com"
-    git config user.name "Dry Run"
-    git config commit.gpgsign false
-    {
-      printf '# Fixture\n\n## Backlog loop\n\n'
-      printf -- '- source: %s\n- label: backlog\n- path: BACKLOG.md\n- base-branch: main\n' "$source"
-      printf -- '- merge-method: `squash`\n'
-    } >CLAUDE.md
-    if [ "$source" = "file" ]; then
-      cat >BACKLOG.md <<'EOS'
-# Backlog
-
-| ID | Title | Status | Notes |
-|---|---|---|---|
-| 1 | Add greeting | ready | |
-| 2 | Add greeting tests | ready | |
-| 3 | Add farewell | ready | |
-| 4 | Pick a date format | ready | |
-| 5 | Sync with billing API | ready | |
-EOS
-    fi
-    git add -A
-    git commit -q -m "chore: fixture"
-    git remote add origin https://github.com/example/fixture.git
-    git update-ref refs/remotes/origin/main HEAD
-    mkdir -p .planning/backlog-loop/dry-run
-    jq -n '{
-      next_pr: 201, prs: [], labels: ["backlog"], polls: {}, reruns: {}, ci: {pending_polls: 1},
-      repo: { nameWithOwner: "example/fixture", viewerPermission: "ADMIN", defaultBranchRef: {name: "main"},
-              squashMergeAllowed: true, mergeCommitAllowed: true, rebaseMergeAllowed: true, hasIssuesEnabled: true },
-      issues: [
-        {number: 1, title: "Add greeting", labels: ["backlog"], state: "OPEN", comments: []},
-        {number: 2, title: "Add greeting tests", labels: ["backlog"], state: "OPEN", comments: []},
-        {number: 3, title: "Add farewell", labels: ["backlog"], state: "OPEN", comments: []},
-        {number: 4, title: "Pick a date format", labels: ["backlog"], state: "OPEN", comments: []},
-        {number: 5, title: "Sync with billing API", labels: ["backlog"], state: "OPEN", comments: []}
-      ] }' >.planning/backlog-loop/dry-run/gh.json
-  )
+  GH_STUB_ORIGIN="$dir/origin.git"
+  GH_STUB_DB="$dir/gh.json"
+  export GH_STUB_ORIGIN GH_STUB_DB
+  git init -q --bare -b main "$GH_STUB_ORIGIN"
+  git init -q -b main "$dir/repo"
+  cd "$dir/repo" || exit 1
+  git config user.email test@example.com
+  git config user.name "Test"
+  git config commit.gpgsign false
+  {
+    printf '# Fixture\n\n## Backlog loop\n\n'
+    [ $# -eq 0 ] || printf -- '- %s\n' "$@"
+    printf '\n## Other\n\n- source: ignored\n'
+  } >CLAUDE.md
+  printf '# Backlog\n\n| ID | Title | Status |\n|---|---|---|\n' >BACKLOG.md
+  git add -A
+  git commit -q -m "chore: fixture"
+  git remote add origin "$GH_STUB_ORIGIN"
+  git push -q -u origin main
+  jq -n '{next: 1, prs: [], log: [], polls: {}, reruns: {}, runs: {},
+    repo: {nameWithOwner: "example/fixture", viewerPermission: "ADMIN", defaultBranchRef: {name: "main"}}}' >"$GH_STUB_DB"
+  STATE="$PWD/.planning/backlog-loop/state.json"
 }
 
-# hook_input <event> <cwd> [extra jq object]
+sget() { jq -r "$@" "$STATE"; }
+ghlog() { jq -r '.log[]' "$GH_STUB_DB"; }
+gh_set() { jq "$@" "$GH_STUB_DB" >"$GH_STUB_DB.tmp" && mv -f "$GH_STUB_DB.tmp" "$GH_STUB_DB"; }
+
+# plan <json>: write plan.json and apply it.
+plan() {
+  mkdir -p .planning/backlog-loop
+  printf '%s' "$1" >.planning/backlog-loop/plan.json
+  "$L" plan-apply
+}
+
+# planned <json>: a plan-only run, so that a plan exists before a run starts.
+planned() {
+  "$L" start --session s1 plan >/dev/null
+  plan "$1" >/dev/null
+}
+
+# next: ask for the next action. Sets ACTION (JSON) and ACT (its name).
+next() {
+  ACTION="$("$L" next 2>&1)"
+  ACT="$(printf '%s' "$ACTION" | jq -r '.action' 2>/dev/null)"
+}
+
+# commit_on <branch> <start point> <message> [file...]: one commit on a branch,
+# made in a throwaway worktree the way a worker would. A file argument is a
+# name, name=content, or -name to delete the file.
+commit_on() {
+  local branch="$1" from="$2" msg="$3" wt f name
+  shift 3
+  wt="$T_TMP/wt-$RANDOM-$RANDOM"
+  git worktree add -q --detach "$wt" "$from" || return 1
+  for f in "$@"; do
+    name="${f%%=*}"
+    case "$f" in
+      -*) rm -f "$wt/${f#-}" ;;
+      *=*) printf '%s\n' "${f#*=}" >"$wt/$name" ;;
+      *) printf '%s\n' "$name" >"$wt/$name" ;;
+    esac
+  done
+  git -C "$wt" add -A
+  git -C "$wt" commit -q -m "$msg"
+  git branch -f "$branch" "$(git -C "$wt" rev-parse HEAD)" >/dev/null
+  git worktree remove --force "$wt"
+}
+
+# work <item> [file...]: what an item worker does. One commit with the trailer
+# on the item's branch. Without files it writes item-<id>.txt.
+work() {
+  local id="$1" branch
+  shift
+  [ $# -gt 0 ] || set -- "item-$id.txt"
+  branch="$(sget --arg i "$id" '.items[$i].branch')"
+  git fetch -q origin main
+  commit_on "$branch" origin/main "feat: item $id
+
+Backlog-Item: $id" "$@"
+}
+
+# push_on <batch> <message> [file...]: what a batch worker does. One commit on
+# top of the pushed batch branch, pushed back.
+push_on() {
+  local b="$1" msg="$2" branch
+  shift 2
+  branch="$(jq -r --arg b "$b" '.batches[] | select(.name == $b) | .branch' "$STATE")"
+  git fetch -q origin "$branch"
+  commit_on "tmp-push-$$" "origin/$branch" "$msg" "$@" || return 1
+  git push -q origin "tmp-push-$$:$branch"
+  git branch -q -D "tmp-push-$$"
+}
+
+# drive: follow next like the orchestrator would, doing the plain work
+# (implement, mark the backlog). Stops at done, halt or any other action.
+drive() {
+  local i=0 ids id b
+  while [ "$i" -lt 60 ]; do
+    i=$((i + 1))
+    next
+    case "$ACT" in
+      implement)
+        ids="$(printf '%s' "$ACTION" | jq -r '.items[].id')"
+        # shellcheck disable=SC2086
+        "$L" record started $ids >/dev/null
+        for id in $ids; do
+          work "$id"
+          "$L" record item "$id" >/dev/null
+        done
+        ;;
+      mark_backlog)
+        b="$(printf '%s' "$ACTION" | jq -r '.batch')"
+        "$L" record started --batch "$b" >/dev/null
+        push_on "$b" "docs: mark batch $b done
+
+Backlog-Status: $b" "BACKLOG.md=marked $b"
+        "$L" record marked "$b" >/dev/null
+        ;;
+      wait) ;;
+      *) return 0 ;;
+    esac
+  done
+  return 1
+}
+
+# hook_input <session> [extra jq object]: the JSON a hook receives on stdin.
 hook_input() {
-  local extra="${3:-}"
+  local extra="${2:-}"
   [ -n "$extra" ] || extra='{}'
-  jq -n --arg e "$1" --arg cwd "$2" --argjson extra "$extra" \
-    '{session_id: "dry", cwd: $cwd, permission_mode: "auto", hook_event_name: $e} + $extra'
+  jq -n --arg s "$1" --arg cwd "$PWD" --argjson extra "$extra" '{session_id: $s, cwd: $cwd} + $extra'
 }
 
 bash_input() {
-  # bash_input <cwd> <command>
-  jq -n --arg cwd "$1" --arg c "$2" \
-    '{session_id: "dry", cwd: $cwd, permission_mode: "auto", hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}'
+  # bash_input <command>
+  jq -n --arg cwd "$PWD" --arg c "$1" \
+    '{session_id: "s1", cwd: $cwd, hook_event_name: "PreToolUse", tool_name: "Bash", tool_input: {command: $c}}'
 }

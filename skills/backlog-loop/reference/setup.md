@@ -1,140 +1,86 @@
 # Setup, configuration and troubleshooting
 
-Detail that the README leaves out: requirements, project configuration,
-permissions for unattended runs, the run's files, resuming and fixing problems.
+## Requirements
 
-## Requirements and location
+- `git`, `jq` and a recent `gh` that has `gh pr revert` and
+  `gh pr update-branch` (developed against 2.102), on macOS or Linux.
+- A GitHub repository you can push branches to and merge pull requests in.
+- CI that runs on pull requests. The loop tests nothing locally: a batch
+  merges only when its checks are green. For a repository where some pull
+  requests run no checks, see `ci` below.
+- A green base branch. The loop refuses to start on a red one.
 
-Requires `git`, `gh` and `jq` (1.6 or later), on macOS or Linux. Developed
-against Claude Code 2.1.289 and gh 2.102. The test suite passes on macOS
-(bash 3.2, jq 1.7) and on Debian 12 (bash 5.2, jq 1.6, git 2.39).
+The hooks look for the skill at `~/.claude/skills/backlog-loop/` or
+`<project>/.claude/skills/backlog-loop/`, because Claude Code does not expand
+`${CLAUDE_SKILL_DIR}` in hook commands. For any other location, set
+`BACKLOG_LOOP_HOME` to the skill directory in the `env` block of your
+settings.
 
-The hooks look for the skill at `~/.claude/skills/backlog-loop/` (personal) or
-`<project>/.claude/skills/backlog-loop/` (project), because Claude Code does not
-expand `${CLAUDE_SKILL_DIR}` in hook commands. For any other location, set
-`BACKLOG_LOOP_HOME` to the skill directory in the `env` block of your settings.
-See the [root README](../../../README.md) for installing skills.
+## Commands
 
-## Arguments
-
-| Argument | Effect |
+| Command | Effect |
 |---|---|
-| none | Runs preflight, plans, then loops until done. Resumes when an unfinished run exists. |
-| `--plan-only` | Writes `.planning/backlog-loop/plan.md` and halts. `/backlog-loop --resume` executes the plan. |
-| `--resume` | Requires an unfinished run. Reconciles it with GitHub and continues. |
-| `--no-merge` | Every batch stops at a green PR. Batches that depend on an unmerged batch wait: merge, then `--resume`. |
-| `--gitignore` | Writes `.planning/backlog-loop/` to `.gitignore` instead of `.git/info/exclude`. |
+| `/backlog-loop` | Runs every remaining batch, wave by wave. Plans first when there is no plan or nothing is left of it. Continues an unfinished run. |
+| `/backlog-loop D` | Runs batch D only. Several names run several batches, in waves among themselves. |
+| `/backlog-loop plan` | Plans the open items into batches, shows the plan and stops. Use it after the backlog changed, or to queue set-aside items again. |
+| `/backlog-loop status` | Shows the plan and the last report. Changes nothing. |
+| `--no-merge` | With any of the run forms: each batch stops at a green pull request. Merge it, then run `/backlog-loop` again for the batches that need it. |
 
-Arguments combine, for example `/backlog-loop --plan-only --no-merge`.
+A batch that needs an unmerged batch cannot be started alone: name both, as
+in `/backlog-loop B D`.
 
-Start from the repository's main checkout, on the base branch, with a clean
-tree. Preflight checks that and prints every problem with its fix:
+## Configuration
 
-```text
-Preflight: 10 passed, 2 failed, 1 warning
-FAIL  Branch rules: main requires 1 approving review
-      Fix: allow bypass for your account, or run with --no-merge
-FAIL  Baseline: CI is red on main: test
-      Fix: main must be green before starting
-WARN  Research: deny rule 'WebFetch' in .claude/settings.json; research uses the codebase only
-Nothing was changed.
-```
-
-## Project configuration
-
-Add a `## Backlog loop` section to the project's `CLAUDE.md` (`.claude/CLAUDE.md`
-and `AGENTS.md` are read too). Every key is optional when it can be detected.
-
-The loop tests nothing locally. The repository's CI is the only gate: it must
-run on pull requests, and a batch merges only when every check is green. A
-repository without CI fails preflight.
+Optional. Add a section to the project's `CLAUDE.md` (`.claude/CLAUDE.md` and
+`AGENTS.md` are read too):
 
 ```markdown
 ## Backlog loop
 
-- source: github
-- label: backlog
-- base-branch: main
+- source: file
+- path: BACKLOG.md
 - merge-method: squash
 ```
 
 | Key | Default | Meaning |
 |---|---|---|
-| `source` | detected | `github` (issues) or `file`. Detected when only one of the two exists. |
-| `label` | `backlog` | GitHub: open issues with this label are the backlog. |
-| `path` | `BACKLOG.md` | File: the backlog file. |
-| `base-branch` | repository default | Branch the PRs target. |
+| `source` | from the plan | `github` (issues) or `file`. Without it the planner follows the repository's evidence. |
+| `label` | `backlog` | `github`: open issues with this label are the backlog. |
+| `path` | `BACKLOG.md` | `file`: the backlog file. |
+| `base-branch` | repository default | The branch the pull requests target. |
 | `merge-method` | `squash` | `squash`, `merge` or `rebase`. |
-| `model-light` | `haiku` | Model for `light` batches and for research. |
-| `model-standard` | `sonnet` | Model for `standard` batches. |
-| `model-complex` | `opus` | Model for `complex` batches. |
-| `agent-light`, `agent-standard`, `agent-complex` | none | A subagent that implements items of that tier instead of `general-purpose`. |
-| `batch-commits` | `per-item` | `per-item` or `squashed`: one commit per item in the PR, or one per batch. |
+| `ci` | `required` | `required`: a pull request without any check halts the run. `optional`: it merges after a grace period of five minutes. |
+| `model-light`, `model-standard`, `model-complex` | `haiku`, `sonnet`, `opus` | The model for workers of each tier. |
+| `model-research` | `sonnet` | The model for research on unclear items. |
+| `parallel-batches` | 3 | Batches per wave. |
+| `parallel-workers` | 6 | Workers at once, across the wave. |
+| `max-attempts` | 2 | Worker attempts per item before it is set aside. |
+| `max-fixes` | 2 | Fix attempts on a red pull request before the batch is set aside. |
+| `ci-wait-minutes` | 45 | How long one CI run may take before it counts as failed. |
+| `worker-minutes` | 90 | How long a worker may stay silent before it counts as failed. |
+| `verify-minutes` | 20 | How long to wait for CI on the base branch after a merge. |
+| `max-hours` | 12 | Wall-clock limit of one run. |
 
-A model is `haiku`, `sonnet`, `opus`, `fable`, or `inherit` (the
-orchestrator's model). The tier of each batch and item is chosen at planning
-time; see [batching.md](batching.md#model-tier).
-
-The Agent tool cannot set reasoning effort per call. To control it, define a
-project agent in `.claude/agents/<name>.md` with `model` and `effort` in its
-frontmatter, and name it in `agent-<tier>`. The worker is then spawned as that
-agent and the agent file decides model, effort and tools; `model-<tier>` is
-not used for it. Preflight warns when the file is in neither
-`.claude/agents/` nor `~/.claude/agents/`. Without an agent, workers use the
-effort of the session that runs the loop.
-
-With `batch-commits: squashed` the batch branch holds one commit that carries
-every item's trailer. A single item can then not be dropped from a red PR: a
-worker fixes the batch, or its items are blocked when the attempts run out.
-With the default squash merge, both settings land as one commit on the base
-branch.
-
-Limits, all optional:
-
-| Key | Default |
-|---|---|
-| `max-attempts` (per item) | 3 |
-| `ci-reruns` (per batch) | 1 |
-| `ci-wait-minutes` (per attempt) | 45 |
-| `research-passes` (per question) | 1 |
-| `parallel-items` (workers at once) | 5 |
-| `stall-threshold` (unchanged gate checks) | 2 |
-| `max-iterations` | 100 |
-| `max-hours` | 12 |
-| `worker-wait-minutes` | 120 |
-| `max-batch-items` | 15 |
+The configuration is read again at every start.
 
 ### Backlog sources
 
-**GitHub:** open issues with the label. Results are mirrored as comments and
-the labels `blocked` and `needs-review`; merged PRs close their issues with
-`Closes #<id>`. An issue that already carries `blocked` is skipped.
+**GitHub issues.** Items are issue numbers. The pull request closes them
+with `Closes #<n>`. A set-aside item gets a comment that says why and what it
+needs.
 
-**File:** `BACKLOG.md` with either layout:
-
-```markdown
-| ID | Title | Status | Notes |
-|---|---|---|---|
-| B-1 | Add greeting | ready | |
-
-- [ ] B-2: Add farewell
-```
-
-Rows with status `done`, `cancelled`, `merged` or `closed`, checked boxes, and
-everything under `## Archive` are skipped. Give checkbox items an id; without
-one the id is `item-<position>`, which shifts when the list is edited. At the
-end of the run one extra PR marks merged items done and annotates blocked ones
-with `BLOCKED: <reason>`.
+**A backlog file.** Any layout the repository uses. The planner reads it;
+the script never parses it. Before a batch's pull request opens, a worker
+marks the batch's items in the file, in the file's own conventions, as one
+commit on the batch branch. Status and code merge together, and a batch that
+does not merge leaves the file untouched.
 
 ## Permissions for unattended runs
 
-The skill's `allowed-tools` covers its scripts, `git` and `gh`, but Claude Code
-applies that grant only to the turn that invoked the skill. After a background
-worker reports, after a resume, and inside workers, your own settings decide.
-Set this up once, before the first unattended run.
-
-**Recommended: auto mode plus a few allow rules.** In
-`.claude/settings.local.json` of the target repository:
+The skill's `allowed-tools` covers its scripts, `git` and `gh`, but Claude
+Code applies that grant only to the turn that invoked the skill. After a
+background worker reports, and inside workers, your own settings decide. Set
+this up once in `.claude/settings.local.json` of the target repository:
 
 ```json
 {
@@ -151,103 +97,69 @@ Set this up once, before the first unattended run.
 }
 ```
 
-- Use the absolute path of your install in the first rule.
-- No test, lint or build command is needed: the loop runs none of them. CI on
-  each pull request is the only test gate.
-- `Bash(gh *)` matters in auto mode: its classifier blocks merging a pull
-  request that no human approved, unless an allow rule matches. Without the
-  rule, use `--no-merge`.
+- Use the path of your install in the first rule. The script prints its
+  commands with the path it was started under, so a symlinked install matches
+  the rule you write for the symlink.
+- The script merges pull requests itself, after it has verified them. The
+  merge happens inside the script call that the first rule allows. Use
+  `--no-merge` to keep the merge button for yourself.
 - `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP`: Claude Code ends a turn after 8 Stop hook
-  blocks in a row. The gate stays one below whatever the cap is and leaves the
-  run resumable, so the default is safe; a higher cap means fewer manual
-  `/backlog-loop` restarts on a long run. `0` removes the cap.
+  blocks in a row. The hook stays one below the cap and leaves the run
+  resumable; a higher cap means fewer manual restarts on a long run.
 
-Other modes:
-
-| Mode | Works? |
-|---|---|
-| `auto` | Yes, recommended, with the rules above. |
-| `dontAsk` | Yes, for a strict setup: everything not in `allow` is denied, so list the file tools too. |
-| `acceptEdits`, `default` (Manual) | Only attended: commands outside the allow list prompt and the run waits for you. |
-| `plan` | No: nothing can be written. |
-| `bypassPermissions` | Works, but only in a container or VM. |
-
-Preflight helps: the skill has Claude run a `git` and a `gh` probe command at
-the very start, so a missing rule shows while you are still there. It also
-fails on `deny` and `ask` rules that match commands the loop needs, in user,
-project, local and managed settings.
-
-What the run can never do, enforced by the guard hook while a run is active:
-force-push, push to the base branch, `gh pr merge --admin`, merge a PR that is
-not verified green, and delete or hand-edit the state file.
-
-GitHub side: your account needs write access, the merge method must be enabled,
-and the base branch must not require human approval (or use `--no-merge`).
+While a run is active a guard hook denies, for the orchestrator: every
+`gh pr merge`, force-pushes, pushes to the base branch, and edits or removal
+of the run's state. The worker prompts carry the same rules.
 
 ## The run's files
 
-`.planning/backlog-loop/` (ignored by git):
+`.planning/backlog-loop/`, ignored through `.git/info/exclude`:
 
 | File | Content |
 |---|---|
-| `state.json` | The run. Written only by `scripts/state.sh`. |
-| `plan.md` | The batches, human readable. |
-| `run.log` | Every action, decision and script result, with timestamps. Removed when the run is done. |
-| `report.md` | The summary, plus one line per batch. |
-| `decisions/<item>.md` | Decision record for each unclear item. |
-| `lock` | Session that owns the run. |
-| `archive/<run id>/` | Earlier runs. |
+| `state.json` | The plan (batches and items) and the current run. Written only by `loop.sh`. |
+| `plan.json` | The planner's last input to `plan-apply`. |
+| `decisions/<item>.md` | The decision record of each researched item. |
+| `report.md` | The report of the last finished run. |
+| `run.log` | Every action and transition, with timestamps. |
+| `lock` | The session that owns the active run. |
 
-When a run reaches `done`, the scripts clean up: branches and worktrees of
-blocked and closed batches are removed (merged ones already were), leftover
-`worktree-*` branches without commits of their own are deleted, and `run.log`,
-`prompts/` and the other working files are removed. `state.json`, `plan.md`,
-`report.md` and `decisions/` stay as the record. A halted or stalled run keeps
-everything, so it can be resumed and diagnosed.
+Branches: `backlog-loop/<batch>/batch-t<n>` for a batch and
+`backlog-loop/<batch>/item-<id>-t<n>` for an item. After a merge the loop
+deletes the batch branch (local and remote) and the item branches. Branches
+of set-aside batches stay, with their open pull request.
 
 ## Resume
 
 Run `/backlog-loop` again. It works after a crash, a usage limit, a closed
-terminal, a halt or a stall. The state is reconciled with GitHub first: a
-merged PR is verified and counted, a closed PR resets its batch, a lost worker
-is started again. Merged batches are never redone. A resume also gives a fresh
-iteration and wall-clock budget.
-
-To look without changing anything:
-
-```bash
-~/.claude/skills/backlog-loop/scripts/state.sh status
-~/.claude/skills/backlog-loop/scripts/next.sh --peek
-~/.claude/skills/backlog-loop/scripts/report.sh
-```
+terminal or a halt. Batches in progress continue where GitHub says they are:
+an open pull request goes on waiting for CI, a merged one is verified, a
+finished worker's commit is kept, and a lost worker's item is handed out
+again. Merged batches are never redone.
 
 ## Troubleshooting
 
 | Symptom | Cause and fix |
 |---|---|
-| `FAIL  Filesystem: another session (...) is running the loop` | A run is active, or the session that ran it died less than 15 minutes ago. If it is gone: delete `.planning/backlog-loop/lock` and run `/backlog-loop`. |
-| The run stopped although work remains | The Stop hook block cap was reached, or the turn ended on an API error. Run `/backlog-loop`. Raise `CLAUDE_CODE_STOP_HOOK_BLOCK_CAP` to see it less often. |
-| `Backlog loop stalled` | Nothing changed across two stop checks, usually because a command kept being denied. Read the last lines of `run.log`, fix the permission rule, `/backlog-loop --resume`. |
-| Claude waits on a permission prompt | A needed command is not in `allow`. Add it; see "Permissions for unattended runs". |
-| Merge is denied in auto mode | The classifier blocks merging unapproved PRs. Add `Bash(gh *)` to `allow`, or use `--no-merge`. |
-| `guard: PR ... is not verified for merge` | Working as intended: `verify-batch.sh <batch> pre-merge` must print READY first. |
-| Hooks do nothing | The skill is not at `~/.claude/skills/backlog-loop` or `<project>/.claude/skills/backlog-loop`. Set `BACKLOG_LOOP_HOME`. Check with `/hooks`. |
-| `Backlog loop halted: base branch was red ...` | A merge broke the base branch and was reverted. Its items are blocked with the reason. `/backlog-loop --resume` continues with the remaining batches. |
-| `halted: remaining batches depend on pull requests that wait for a human merge` | `--no-merge`: merge the listed PRs, then `/backlog-loop --resume`. |
-| State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active. |
+| `another session (...) is running the loop here` | A run is active, or its session died less than 15 minutes ago. If it is gone, delete `.planning/backlog-loop/lock` and run `/backlog-loop`. |
+| `CI is red on main` | The base branch must be green before the loop adds to it. |
+| `batch D needs B, which is not merged` | Run both: `/backlog-loop B D`. If B was set aside, D waits until B's items are planned again and merged. |
+| `halted - no CI checks ran on PR #n` | The pull request triggered no workflow. Add CI for pull requests, or set `ci: optional`. |
+| `halted - URGENT: main is red after PR #n merged` | CI on the base branch failed after the merge. Merge the revert pull request the loop opened, then run `/backlog-loop`. |
+| `halted - stalled` | The agent tried to stop three times without advancing the loop, usually because a command keeps being denied. Read the end of `run.log`, fix the permission rule, run `/backlog-loop`. |
+| The run stopped although work remains | The Stop hook block cap was reached, or the turn ended on an error. Run `/backlog-loop`. |
+| A batch was set aside with its pull request open | CI stayed red after `max-fixes` attempts, or a conflict with the base branch could not be resolved. Fix and merge the pull request yourself, or close it and run `/backlog-loop plan` to queue its items again. |
+| Hooks do nothing | The skill is in neither default location. Set `BACKLOG_LOOP_HOME`. Check with `/hooks`. |
+| State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active. The next run plans again. |
 
 ## Tests
 
 ```bash
-tests/run.sh            # everything, about three minutes
-tests/run.sh --quick    # unit suites only
-tests/dry-run.sh github # the full loop on a fixture repository, no network
-tests/dry-run.sh file
+tests/run.sh
 ```
 
-The suite runs in CI on every pull request that touches the skill
-(`.github/workflows/backlog-loop.yml`). The dry run sets
-`BACKLOG_LOOP_DRY_RUN=1`, which puts stub `gh` and `git` (push, fetch, pull)
-from `tests/stubs/` first on `PATH`. It drives a five-item backlog through
-planning, batches, a CI failure with a fix, an unclear item with a decision
-record, a hard blocker, and the final report.
+Plain bash. The scenario suite runs the whole loop against a real git
+repository with a bare origin and a stub `gh` (`tests/stubs/gh`) that merges,
+updates and reverts for real and reads CI results from marker files in the
+commit. The suite runs in CI on every pull request that touches the skill
+(`.github/workflows/backlog-loop.yml`), together with shellcheck.

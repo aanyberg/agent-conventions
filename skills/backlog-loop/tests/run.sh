@@ -1,8 +1,5 @@
 #!/usr/bin/env bash
 # Run every test suite, and shellcheck when it is installed.
-#
-#   tests/run.sh            all suites
-#   tests/run.sh --quick    skip the slow end-to-end suites
 set -u
 TESTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(cd "$TESTS_DIR/.." && pwd)"
@@ -23,20 +20,13 @@ run() {
 
 SHELLCHECK="${SHELLCHECK:-shellcheck}"
 if command -v "$SHELLCHECK" >/dev/null 2>&1; then
-  run "shellcheck" bash -c "cd '$SKILL_DIR' && '$SHELLCHECK' scripts/*.sh tests/*.sh tests/stubs/gh tests/stubs/git"
+  run "shellcheck" bash -c "cd '$SKILL_DIR' && '$SHELLCHECK' scripts/*.sh tests/*.sh tests/stubs/gh"
 else
   echo "SKIP  shellcheck (not installed; set SHELLCHECK=/path/to/shellcheck)"
 fi
 
-run "state.sh" bash "$TESTS_DIR/test-state.sh"
-run "next.sh" bash "$TESTS_DIR/test-next.sh"
-run "stop-gate.sh" bash "$TESTS_DIR/test-stop-gate.sh"
-run "guard.sh" bash "$TESTS_DIR/test-guard.sh"
-if [ "${1:-}" != "--quick" ]; then
-  run "scenarios" bash "$TESTS_DIR/test-scenarios.sh"
-  run "dry run (github)" bash "$TESTS_DIR/dry-run.sh" github
-  run "dry run (file)" bash "$TESTS_DIR/dry-run.sh" file
-fi
+run "scenarios" bash "$TESTS_DIR/test-scenarios.sh"
+run "hooks" bash "$TESTS_DIR/test-hooks.sh"
 
 if [ "$failed" -eq 0 ]; then
   echo "All suites passed."

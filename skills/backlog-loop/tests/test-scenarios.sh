@@ -60,6 +60,15 @@ assert_eq "batch names are stored" "A" "$(sget '.batches[0].name')"
 next
 assert_eq "work starts after planning" "implement" "$ACT"
 
+new_repo
+assert_contains "before any plan the report says so" "no plan yet" "$("$L" status)"
+"$L" start --session s1 >/dev/null
+out="$(plan '{"source":"github","batches":[]}')"
+assert_contains "an empty plan is reported as nothing to do" "nothing to do" "$out"
+assert_lacks "and not as a missing plan" "no plan yet" "$out"
+next
+assert_eq "the run ends" "done" "$ACT"
+
 echo "3. Independent batches run in the same wave"
 new_repo
 "$L" start --session s1 >/dev/null

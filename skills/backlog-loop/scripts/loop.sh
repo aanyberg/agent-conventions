@@ -957,6 +957,7 @@ cmd_plan_apply() {
                  | map_values(if .status == "aside" then .batch = null else . end)) + $new)
     | .config.source = (.config.source_cfg // $p.source // .config.source // "github")
     | .config.backlog = (.config.backlog_cfg // $p.backlog // .config.backlog // "BACKLOG.md")
+    | .planned_at = now
     | .run.replan = false'
   load
   case "$SOURCE" in github | file) ;; *) die "plan.json: source must be \"github\" or \"file\"" ;; esac
@@ -1302,8 +1303,15 @@ cmd_prompt() {
 
 cmd_report() {
   paths
-  if [ ! -f "$STATE" ] || [ "$(st '.batches | length')" = "0" ]; then
+  local empty=true
+  if [ -f "$STATE" ] && [ "$(st '(.batches | length) + (.items | length)')" != "0" ]; then empty=false; fi
+  if [ ! -f "$STATE" ] || { [ "$empty" = "true" ] && [ "$(st '.planned_at // 0')" = "0" ]; }; then
     echo "Backlog loop: no plan yet. Run /backlog-loop to plan the backlog into batches."
+    return 0
+  fi
+  if [ "$empty" = "true" ]; then
+    echo "Backlog loop: nothing to do. The last plan found no open backlog item that can be built here."
+    echo "Run /backlog-loop plan after the backlog changes."
     return 0
   fi
   st '

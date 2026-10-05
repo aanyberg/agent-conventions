@@ -4,7 +4,8 @@
 # rerun, update from base, merge, verify. The orchestrating agent only gets
 # the steps that need judgement, one action at a time, from `next`.
 #
-#   loop.sh start [--session ID] [--no-merge] [plan] [BATCH...]
+#   loop.sh start [--session ID] plan
+#   loop.sh start [--session ID] [--no-merge] execute [BATCH...]
 #   loop.sh next
 #   loop.sh plan-apply
 #   loop.sh record started <item>... | --batch <batch>
@@ -30,6 +31,7 @@ SLICE="${BACKLOG_LOOP_SLICE_SECONDS:-100}"
 SETTLE="${BACKLOG_LOOP_SETTLE_SECONDS:-30}"
 GRACE="${BACKLOG_LOOP_CI_GRACE_SECONDS:-300}"
 LOCK_STALE="${BACKLOG_LOOP_LOCK_STALE_SECONDS:-900}"
+USAGE="Usage: /backlog-loop plan | execute [BATCH...] [--no-merge] | status"
 ID_RE='^[A-Za-z0-9][A-Za-z0-9._-]*$'
 CHANGED=0
 FAILED_CHECKS=""
@@ -87,7 +89,7 @@ lim() { st ".config.limits.$1"; }
 
 load() {
   paths
-  [ -f "$STATE" ] || die "no backlog-loop state here. Start with /backlog-loop."
+  [ -f "$STATE" ] || die "no backlog-loop state here. Start with /backlog-loop plan."
   jq -e . "$STATE" >/dev/null 2>&1 || die "the state file is not valid JSON: $STATE"
   BASE="$(st .config.base)"
   METHOD="$(st .config.merge_method)"
@@ -95,7 +97,7 @@ load() {
 }
 
 running() { [ "$(st .run.status)" = "running" ]; }
-need_running() { running || die "no run is active. Start one with /backlog-loop."; }
+need_running() { running || die "no run is active. Start one with /backlog-loop plan or /backlog-loop execute."; }
 
 # --- lock -----------------------------------------------------------------
 
@@ -360,7 +362,7 @@ integrate() {
     # Items go back to "built" so the next call integrates again.
     for id in $(batch_items "$b" '.status == "conflict" or .applied'); do iup "$id" '.status = "built" | .applied = false'; done
     log "batch $b: push of $branch failed ($fails)"
-    [ "$fails" -lt 3 ] || halt_run "cannot push to origin (branch $branch). Check your access, then run /backlog-loop."
+    [ "$fails" -lt 3 ] || halt_run "cannot push to origin (branch $branch). Check your access, then run /backlog-loop execute."
     return
   fi
   bup "$b" '.phase = "apply"'
@@ -460,7 +462,7 @@ adv_ci() {
         bup "$b" '.phase = "merge" | .unchecked = true'
         CHANGED=1
       else
-        halt_run "no CI checks ran on PR #$pr (batch $b). The loop merges only what CI has checked. Add CI for pull requests, or add '- ci: optional' to the '## Backlog loop' section, then run /backlog-loop."
+        halt_run "no CI checks ran on PR #$pr (batch $b). The loop merges only what CI has checked. Add CI for pull requests, or add '- ci: optional' to the '## Backlog loop' section, then run /backlog-loop execute."
       fi
       ;;
     red)
@@ -575,7 +577,7 @@ adv_verify() {
       done
       batch_aside "$b" "$BASE went red after its merge"
       if [ -n "$url" ]; then
-        halt_run "URGENT: $BASE is red after PR #$pr (batch $b) merged. Revert PR opened: $url. Merge it, then run /backlog-loop."
+        halt_run "URGENT: $BASE is red after PR #$pr (batch $b) merged. Revert PR opened: $url. Merge it, then run /backlog-loop execute."
       else
         halt_run "URGENT: $BASE is red after PR #$pr (batch $b) merged, and the revert PR could not be opened. Run: gh pr revert $pr"
       fi
@@ -754,7 +756,7 @@ cmd_next() {
   lock_touch
   started="$(st .run.started)"
   if [ $(($(now) - started)) -ge $(($(lim max_hours) * 3600)) ]; then
-    halt_run "the run reached its limit of $(lim max_hours) hours. Run /backlog-loop to continue."
+    halt_run "the run reached its limit of $(lim max_hours) hours. Run /backlog-loop execute to continue."
     pick_action
     return 0
   fi
@@ -792,7 +794,7 @@ resolve_selection() {
       + [ $s.batches[] | select(.name as $n | $req | index($n)) | select(.status == "todo") | .name as $b
           | .needs[] | . as $n | status($n) as $st
           | select($st != "merged" and (($req | index($n)) | not))
-          | "batch \($b) needs \($n), which is not merged (\($st // "unknown")). Run /backlog-loop \($n) \($b)" ]
+          | "batch \($b) needs \($n), which is not merged (\($st // "unknown")). Run /backlog-loop execute \($n) \($b)" ]
       | .[]')"
   if [ -n "$err" ]; then
     printf '%s\n' "$err"
@@ -828,21 +830,37 @@ reconcile() {
 }
 
 cmd_start() {
-  local session="unknown" no_merge="" plan_only=false names="" cfg owner prev takeover=false tool
+  local session="unknown" no_merge="" plan_only=false names="" cfg owner prev takeover=false tool mode=""
   while [ $# -gt 0 ]; do
     case "$1" in
       --session) session="${2:-unknown}"; shift 2 ;;
       --no-merge) no_merge=true; shift ;;
-      plan) plan_only=true; shift ;;
-      status) cmd_report; exit 0 ;;
-      -*) die "unknown option $1. Usage: /backlog-loop [--no-merge] [plan | status | BATCH...]" ;;
+      -*) die "unknown option $1. $USAGE" ;;
       *)
-        printf '%s' "$1" | grep -Eq "$ID_RE" || die "'$1' is not a batch name"
-        names="$names $1"
+        if [ -z "$mode" ]; then
+          case "$1" in
+            plan | execute | status) mode="$1" ;;
+            *) die "unknown command '$1'. To run a batch: /backlog-loop execute $1. $USAGE" ;;
+          esac
+        elif [ "$mode" = "execute" ]; then
+          printf '%s' "$1" | grep -Eq "$ID_RE" || die "'$1' is not a batch name"
+          names="$names $1"
+        else
+          die "'$mode' takes no arguments. $USAGE"
+        fi
         shift
         ;;
     esac
   done
+  case "$mode" in
+    plan) plan_only=true ;;
+    execute) ;;
+    *)
+      cmd_report
+      printf '\nNothing was started. %s\n' "$USAGE"
+      exit 0
+      ;;
+  esac
   for tool in git gh jq; do
     command -v "$tool" >/dev/null 2>&1 || die "$tool is not installed"
   done
@@ -873,6 +891,16 @@ cmd_start() {
     die "CI is red on $BASE. The base branch must be green before the loop adds to it."
   fi
 
+  if running && [ "$(st '.run.plan_only // false')" != "$plan_only" ]; then
+    if [ "$plan_only" = "true" ]; then
+      die "a run is in progress. Continue it with /backlog-loop execute; plan again when it has finished."
+    fi
+    die "planning is not finished. Run /backlog-loop plan."
+  fi
+  if [ "$plan_only" = "false" ] && ! running &&
+    [ "$(st '[.batches[] | select(.status == "todo" or .status == "active")] | length')" = "0" ]; then
+    die "there is no batch left to execute. Run /backlog-loop plan to plan the open backlog items into batches."
+  fi
   if running; then
     prev="$(st '.run.session // ""')"
     [ "$prev" = "$session" ] || takeover=true
@@ -883,11 +911,10 @@ cmd_start() {
     printf 'Resuming the unfinished run %s.\n' "$(st .run.id)"
   else
     up --arg s "$session" --arg names "$names" --arg nm "$no_merge" --argjson po "$plan_only" --argjson t "$(now)" '
-      ([.batches[] | select(.status == "todo" or .status == "active")] | length) as $open
-      | .run = {id: ($t | strftime("%Y%m%d-%H%M%S")), status: "running", reason: null, session: $s, started: $t,
+      .run = {id: ($t | strftime("%Y%m%d-%H%M%S")), status: "running", reason: null, session: $s, started: $t,
                 no_merge: ($nm == "true"), plan_only: $po, wave: 0, ticks: 0,
                 requested: ($names | split(" ") | map(select(. != ""))), selected: [],
-                replan: ($po or (($open == 0) and ($names == "")))}'
+                replan: $po}'
     printf 'Started run %s.\n' "$(st .run.id)"
   fi
   lock_write "$session"
@@ -1306,7 +1333,7 @@ cmd_report() {
   local empty=true
   if [ -f "$STATE" ] && [ "$(st '(.batches | length) + (.items | length)')" != "0" ]; then empty=false; fi
   if [ ! -f "$STATE" ] || { [ "$empty" = "true" ] && [ "$(st '.planned_at // 0')" = "0" ]; }; then
-    echo "Backlog loop: no plan yet. Run /backlog-loop to plan the backlog into batches."
+    echo "Backlog loop: no plan yet. Run /backlog-loop plan to plan the backlog into batches."
     return 0
   fi
   if [ "$empty" = "true" ]; then

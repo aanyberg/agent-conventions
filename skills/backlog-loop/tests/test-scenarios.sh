@@ -33,7 +33,7 @@ echo "1. /backlog-loop D runs only batch D"
 new_repo
 planned "$(plan_of github "$(batch A '[]' 1)" "$(batch B '[]' 2)" "$(batch C '[]' 3)" "$(batch D '[]' 4 5)")"
 assert_eq "a plan-only run ends after planning" "done" "$(sget .run.status)"
-"$L" start --session s1 D >/dev/null
+"$L" start --session s1 execute D >/dev/null
 drive
 assert_eq "run finishes" "done" "$ACT"
 assert_eq "D is merged" "merged" "$(batch_field D .status)"
@@ -44,11 +44,17 @@ report="$("$L" report)"
 assert_contains "report lists what was implemented" "Batch D" "$report"
 assert_contains "report lists remaining batches" "Batch A" "${report#*Remaining}"
 
-echo "2. Without a plan the first action is to plan"
+echo "2. plan creates the batches, execute runs them"
 new_repo
-"$L" start --session s1 >/dev/null
+out="$("$L" start --session s1)"
+assert_contains "without a command nothing starts and the usage is shown" "Nothing was started. Usage: /backlog-loop plan | execute" "$out"
+out="$("$L" start --session s1 execute 2>&1)"
+assert_contains "execute without a plan is refused" "Run /backlog-loop plan" "$out"
+out="$("$L" start --session s1 D 2>&1)"
+assert_contains "a bare batch name points to execute" "/backlog-loop execute D" "$out"
+"$L" start --session s1 plan >/dev/null
 next
-assert_eq "action is plan" "plan" "$ACT"
+assert_eq "plan asks for a plan" "plan" "$ACT"
 out="$(plan '{"source":"github","batches":[{"name":"A","theme":"x","items":[{"id":"1","title":"t"}]},{"name":"A","theme":"y","items":[{"id":"2","title":"t"}]}]}' 2>&1)"
 assert_contains "a duplicate batch name is rejected" "more than once" "$out"
 out="$(plan '{"source":"github","batches":[{"name":"B","theme":"x","needs":["Z"],"items":[{"id":"1","title":"t"}]}]}' 2>&1)"
@@ -58,11 +64,16 @@ assert_contains "an item in two batches is rejected" "more than one batch" "$out
 plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
 assert_eq "batch names are stored" "A" "$(sget '.batches[0].name')"
 next
-assert_eq "work starts after planning" "implement" "$ACT"
+assert_eq "planning ends without starting work" "done todo" "$ACT $(sget '.batches[0].status')"
+"$L" start --session s1 execute >/dev/null
+out="$("$L" start --session s1 plan 2>&1)"
+assert_contains "planning is refused while a run is in progress" "a run is in progress" "$out"
+next
+assert_eq "execute starts the work" "implement" "$ACT"
 
 new_repo
 assert_contains "before any plan the report says so" "no plan yet" "$("$L" status)"
-"$L" start --session s1 >/dev/null
+"$L" start --session s1 plan >/dev/null
 out="$(plan '{"source":"github","batches":[]}')"
 assert_contains "an empty plan is reported as nothing to do" "nothing to do" "$out"
 assert_lacks "and not as a missing plan" "no plan yet" "$out"
@@ -71,8 +82,7 @@ assert_eq "the run ends" "done" "$ACT"
 
 echo "3. Independent batches run in the same wave"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch B '[]' 1 2)" "$(batch C '[]' 3)")" >/dev/null
+execute "$(plan_of github "$(batch B '[]' 1 2)" "$(batch C '[]' 3)")"
 next
 assert_eq "one implement action covers both batches" "B B C" "$(printf '%s' "$ACTION" | jq -r '[.items[].batch] | join(" ")')"
 "$L" record started 1 2 3 >/dev/null
@@ -85,8 +95,7 @@ assert_eq "both ran in wave 1" "1 1" "$(sget '[.batches[].wave] | join(" ")')"
 
 echo "4. A batch waits for the batches it needs"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch B '[]' 1)" "$(batch D '["B"]' 2)")" >/dev/null
+execute "$(plan_of github "$(batch B '[]' 1)" "$(batch D '["B"]' 2)")"
 next
 assert_eq "wave 1 holds only B" "1" "$(printf '%s' "$ACTION" | jq -r '[.items[].id] | join(" ")')"
 drive
@@ -94,8 +103,7 @@ assert_eq "D ran in a later wave" "2" "$(batch_field D .wave)"
 assert_eq "D is merged after B" "merged" "$(batch_field D .status)"
 
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch B '[]' 1)" "$(batch D '["B"]' 2)")" >/dev/null
+execute "$(plan_of github "$(batch B '[]' 1)" "$(batch D '["B"]' 2)")"
 next
 "$L" record started 1 >/dev/null
 "$L" record item 1 --blocker "needs production credentials" >/dev/null
@@ -106,13 +114,12 @@ assert_eq "D is not built" "todo" "$(batch_field D .status)"
 report="$("$L" report)"
 assert_contains "D is reported as remaining" "Batch D" "${report#*Remaining}"
 assert_contains "the report says what D waits for" "needs B" "$report"
-out="$("$L" start --session s1 D 2>&1)"
+out="$("$L" start --session s1 execute D 2>&1)"
 assert_contains "starting D alone is refused while B is not merged" "needs B" "$out"
 
 echo "5. One pull request per batch, one commit per item"
 new_repo
-"$L" start --session s1 --no-merge >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1 2 3)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1 2 3)")" --no-merge
 drive
 assert_eq "run finishes" "done" "$ACT"
 assert_eq "the batch waits for the user's merge" "ready" "$(batch_field A .status)"
@@ -124,8 +131,7 @@ assert_lacks "nothing is merged with --no-merge" "merge " "$(ghlog)"
 
 echo "6. A worker's claim is checked against its branch"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1 2)")"
 next
 "$L" record started 1 2 >/dev/null
 out="$("$L" record item 1 2>&1)"
@@ -149,9 +155,8 @@ decision() {
     >".planning/backlog-loop/decisions/$1.md"
 }
 new_repo
-"$L" start --session s1 >/dev/null
-plan '{"source":"github","batches":[{"name":"A","theme":"x","items":[
-  {"id":"1","title":"Clear"},{"id":"2","title":"Unclear","question":"One line or two?"},{"id":"3","title":"Murky","question":"Which provider?"}]}]}' >/dev/null
+execute '{"source":"github","batches":[{"name":"A","theme":"x","items":[
+  {"id":"1","title":"Clear"},{"id":"2","title":"Unclear","question":"One line or two?"},{"id":"3","title":"Murky","question":"Which provider?"}]}]}'
 next
 assert_eq "research comes first" "research" "$ACT"
 assert_eq "for the unclear items" "2 3" "$(printf '%s' "$ACTION" | jq -r '[.items[].id] | join(" ")')"
@@ -175,8 +180,7 @@ assert_contains "the report says what a set-aside item needs" "the owner's choic
 
 echo "8. Red CI: rerun once, then fix, then set the batch aside"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)")"
 next
 "$L" record started 1 >/dev/null
 work 1 item-1.txt .ci-flaky
@@ -186,8 +190,7 @@ assert_eq "a flaky failure merges after one rerun" "merged" "$(batch_field A .st
 assert_contains "the failed run was rerun" "rerun" "$(ghlog)"
 
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)")"
 next
 "$L" record started 1 >/dev/null
 work 1 item-1.txt .ci-fail
@@ -211,8 +214,7 @@ assert_eq "its pull request stays open" "OPEN" "$(jq -r '.prs[0].state' "$GH_STU
 assert_contains "the report names the open pull request" "#1" "$("$L" report)"
 
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1 2)")"
 next
 "$L" record started 1 2 >/dev/null
 work 1
@@ -237,8 +239,7 @@ if on_main item-2.txt; then not_ok "the dropped item is not on the base branch";
 
 echo "9. Later batches of a wave are updated from base before they merge"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)" "$(batch B '[]' 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)" "$(batch B '[]' 2)")"
 drive
 assert_eq "both merge" "merged merged" "$(sget '[.batches[].status] | join(" ")')"
 log="$(ghlog)"
@@ -250,8 +251,7 @@ case "$log" in
 esac
 
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)" "$(batch B '[]' 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)" "$(batch B '[]' 2)")"
 next
 "$L" record started 1 2 >/dev/null
 work 1 shared.txt=from-one
@@ -268,8 +268,7 @@ assert_eq "an unresolved conflict sets the batch aside" "aside" "$(batch_field B
 
 echo "10. Items of one batch that conflict are applied by hand"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1 2)")"
 next
 "$L" record started 1 2 >/dev/null
 work 1 shared.txt=from-one
@@ -287,8 +286,7 @@ assert_contains "the item is reported as remaining" "2: Item 2" "$(r="$("$L" rep
 
 echo "11. An interrupted run continues; merged work is not redone"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)" "$(batch B '["A"]' 2 3)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)" "$(batch B '["A"]' 2 3)")"
 drive_until_b() {
   local i=0
   while [ "$i" -lt 30 ]; do
@@ -304,9 +302,9 @@ drive_until_b() {
 drive_until_b
 "$L" record started 2 3 >/dev/null
 work 2
-out="$("$L" start --session s2 2>&1)"
+out="$("$L" start --session s2 execute 2>&1)"
 assert_contains "a live run of another session is not taken over" "another session" "$out"
-out="$(BACKLOG_LOOP_LOCK_STALE_SECONDS=0 "$L" start --session s2 2>&1)"
+out="$(BACKLOG_LOOP_LOCK_STALE_SECONDS=0 "$L" start --session s2 execute 2>&1)"
 assert_contains "the run is resumed" "Resuming" "$out"
 assert_eq "a finished worker's commit is kept" "built" "$(sget '.items["2"].status')"
 assert_eq "a lost worker's item is handed out again" "todo 0" "$(sget '.items["3"] | "\(.status) \(.attempts)"')"
@@ -321,7 +319,7 @@ new_repo
 planned '{"source":"github","batches":[
   {"name":"A","theme":"Forms","title":"feat(forms): validate","items":[{"id":"1","title":"Validate zip"},{"id":"2","title":"Needs keys"}]},
   {"name":"B","theme":"Checkout","items":[{"id":"3","title":"Show total"}]}]}'
-"$L" start --session s1 A >/dev/null
+"$L" start --session s1 execute A >/dev/null
 next
 "$L" record started 1 2 >/dev/null
 work 1
@@ -339,8 +337,7 @@ assert_contains "status prints the same without a run" "Batch B" "$("$L" status)
 
 echo "13. File backlogs are marked in the batch's pull request"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of file "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of file "$(batch A '[]' 1)")"
 next
 "$L" record started 1 >/dev/null
 work 1
@@ -364,8 +361,7 @@ assert_eq "the batch merges without the mark" "merged" "$(batch_field A .status)
 assert_contains "the report notes the missing mark" "backlog file was not updated" "$("$L" report)"
 
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of file "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of file "$(batch A '[]' 1)")"
 drive
 assert_eq "the batch merges" "merged" "$(batch_field A .status)"
 git fetch -q origin main
@@ -374,8 +370,7 @@ assert_lacks "file items do not close issues" "Closes" "$(jq -r '.prs[0].body' "
 
 echo "14. A red base branch after a merge halts the run with a revert PR"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)" "$(batch B '["A"]' 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)" "$(batch B '["A"]' 2)")"
 next
 "$L" record started 1 >/dev/null
 work 1 item-1.txt .ci-fail-base
@@ -389,8 +384,7 @@ assert_contains "the report is urgent about it" "red" "$("$L" report)"
 
 echo "15. Pull requests without checks"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)")"
 next
 "$L" record started 1 >/dev/null
 work 1 item-1.txt .ci-none
@@ -400,8 +394,7 @@ assert_eq "no checks halts the run by default" "halt" "$ACT"
 assert_lacks "nothing is merged unchecked" "merge " "$(ghlog)"
 
 new_repo "ci: optional"
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)")"
 next
 "$L" record started 1 >/dev/null
 work 1 item-1.txt .ci-none
@@ -411,21 +404,19 @@ assert_eq "with ci: optional it merges" "merged" "$(batch_field A .status)"
 
 echo "16. --no-merge: the next wave starts after the user merged"
 new_repo
-"$L" start --session s1 --no-merge >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)" "$(batch B '["A"]' 2)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)" "$(batch B '["A"]' 2)")" --no-merge
 drive
 assert_eq "the run ends with A waiting and B not started" "ready todo" "$(sget '[.batches[].status] | join(" ")')"
 assert_contains "the report says whose turn it is" "waiting for your merge" "$("$L" report)"
 gh pr merge 1 --squash
-"$L" start --session s1 --no-merge >/dev/null
+"$L" start --session s1 --no-merge execute >/dev/null
 assert_eq "the user's merge is picked up" "merged" "$(batch_field A .status)"
 drive
 assert_eq "B follows" "ready" "$(batch_field B .status)"
 
 echo "17. Workers that never report"
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1)")"
 next
 "$L" record started 1 >/dev/null
 jq '.items["1"].since = 0' "$STATE" >"$STATE.t" && mv "$STATE.t" "$STATE"
@@ -438,8 +429,7 @@ assert_contains "and says how to continue" "/backlog-loop" "$(sget .run.reason)"
 
 echo "18. Limits and configuration"
 new_repo "parallel-batches: 1" "parallel-workers: 2" "merge-method: \`merge\`"
-"$L" start --session s1 >/dev/null
-plan "$(plan_of github "$(batch A '[]' 1 2 3)" "$(batch B '[]' 4)")" >/dev/null
+execute "$(plan_of github "$(batch A '[]' 1 2 3)" "$(batch B '[]' 4)")"
 assert_eq "config is read from the Backlog loop section only" "merge github" "$(sget '"\(.config.merge_method) \(.config.source)"')"
 next
 assert_eq "at most parallel-workers items at once, one batch per wave" "1 2" "$(printf '%s' "$ACTION" | jq -r '[.items[].id] | join(" ")')"

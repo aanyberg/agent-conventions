@@ -45,8 +45,8 @@ stop_hook() {
   blocks="$(jq -r '.run.gate.blocks // 0' "$STATE")"
   if [ "$hash" = "$last" ]; then unchanged=$((unchanged + 1)); else unchanged=0; fi
   if [ "$unchanged" -ge 3 ]; then
-    "$LOOP" _halt "stalled: the loop was not advanced across $unchanged stop checks, usually because a command keeps being denied. See .planning/backlog-loop/run.log, then run /backlog-loop." >/dev/null 2>&1
-    jq -n '{systemMessage: "backlog-loop stalled and was halted. Run /backlog-loop to continue."}'
+    "$LOOP" _halt "stalled: the loop was not advanced across $unchanged stop checks, usually because a command keeps being denied. See .planning/backlog-loop/run.log, then run /backlog-loop execute." >/dev/null 2>&1
+    jq -n '{systemMessage: "backlog-loop stalled and was halted. Run /backlog-loop execute to continue."}'
     exit 0
   fi
 
@@ -58,7 +58,7 @@ stop_hook() {
   case "$cap" in '' | *[!0-9]*) cap=8 ;; esac
   if [ "$cap" -gt 0 ] && [ "$blocks" -ge "$cap" ]; then
     "$LOOP" _gate "$hash" "$unchanged" 0 >/dev/null 2>&1
-    jq -n '{systemMessage: "backlog-loop paused: the Stop hook block cap was reached while work remains. Run /backlog-loop to continue."}'
+    jq -n '{systemMessage: "backlog-loop paused: the Stop hook block cap was reached while work remains. Run /backlog-loop execute to continue."}'
     exit 0
   fi
   "$LOOP" _gate "$hash" "$unchanged" "$blocks" >/dev/null 2>&1 || exit 0

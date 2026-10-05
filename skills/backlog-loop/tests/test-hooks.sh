@@ -13,8 +13,7 @@ allowed() { if [ -z "$1" ]; then echo allow; else decision "$1"; fi; }
 echo "Stop hook"
 new_repo
 assert_eq "no run: the stop is allowed" "allow" "$(allowed "$(stop s1)")"
-"$L" start --session s1 >/dev/null
-plan "$PLAN" >/dev/null
+execute "$PLAN"
 out="$(stop s1)"
 assert_eq "work remains: the stop is blocked" "block" "$(decision "$out")"
 assert_contains "the reason names the next command" "loop.sh next" "$out"
@@ -35,8 +34,7 @@ assert_contains "with a reason" "stalled" "$(sget .run.reason)"
 assert_eq "a halted run does not block" "allow" "$(allowed "$(stop s1)")"
 
 new_repo
-"$L" start --session s1 >/dev/null
-plan "$PLAN" >/dev/null
+execute "$PLAN"
 export CLAUDE_CODE_STOP_HOOK_BLOCK_CAP=3
 stop s1 >/dev/null
 next
@@ -50,8 +48,7 @@ unset CLAUDE_CODE_STOP_HOOK_BLOCK_CAP
 echo "Guard hook"
 new_repo
 assert_eq "no run: nothing is denied" "allow" "$(allowed "$(guard 'gh pr merge 5 --squash')")"
-"$L" start --session s1 >/dev/null
-plan "$PLAN" >/dev/null
+execute "$PLAN"
 deny_case() { assert_eq "denied: $1" "deny" "$(decision "$(guard "$1")")"; }
 allow_case() { assert_eq "allowed: $1" "allow" "$(allowed "$(guard "$1")")"; }
 deny_case 'gh pr merge 5 --squash'

@@ -29,7 +29,7 @@ explains what they do, how to use them, and how they work inside:
 
 | Skill | What it does |
 |---|---|
-| [`backlog-loop`](skills/backlog-loop/README.md) | Works through a whole backlog unattended: themed, CI-gated pull requests, merged and verified, with blocked items reported. |
+| [`backlog-loop`](skills/backlog-loop/README.md) | Works through a backlog unattended: named batches run in waves, one worker per item, one CI-gated pull request per batch, with set-aside and remaining items reported. |
 
 ## Installation
 

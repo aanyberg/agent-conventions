@@ -1018,7 +1018,7 @@ record_started() {
     status="$(iget "$id" .status)"
     b="$(iget "$id" '.batch // empty')"
     [ "$status" = "todo" ] || die "item $id is not waiting to start (status: $status)"
-    [ -n "$b" ] && [ "$(bget "$b" .status)" = "active" ] || die "item $id is not in a batch of this wave"
+    if [ -z "$b" ] || [ "$(bget "$b" .status)" != "active" ]; then die "item $id is not in a batch of this wave"; fi
     if [ "$(iget "$id" '.question != null and .decision == null')" = "true" ]; then
       iup "$id" '.status = "researching" | .since = $t' --argjson t "$t"
       echo "Item $id: research started."
@@ -1091,8 +1091,9 @@ record_applied() {
   # record_applied <item> [failure text]
   local id="$1" fail="${2:-}" b branch
   b="$(iget "$id" '.batch // empty')"
-  [ -n "$b" ] && [ "$(bget "$b" .phase)" = "apply" ] && [ "$(iget "$id" .status)" = "conflict" ] ||
+  if [ -z "$b" ] || [ "$(bget "$b" .phase)" != "apply" ] || [ "$(iget "$id" .status)" != "conflict" ]; then
     die "item $id is not waiting to be applied"
+  fi
   branch="$(bget "$b" .branch)"
   if [ -n "$fail" ]; then
     up --arg i "$id" --arg b "$b" --arg n "it conflicts with other items of batch $b: $fail" '

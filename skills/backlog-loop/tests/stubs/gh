@@ -8,7 +8,7 @@
 #   .ci-none       no checks are reported
 #   .ci-fail-base  PR checks pass; CI on the base branch commit fails
 # The do_* functions run through in_clone.
-# shellcheck disable=SC2016,SC2329
+# shellcheck disable=SC2016,SC2317,SC2329
 set -u
 DB="${GH_STUB_DB:?gh stub: GH_STUB_DB is not set}"
 ORIGIN="${GH_STUB_ORIGIN:?gh stub: GH_STUB_ORIGIN is not set}"
@@ -134,7 +134,7 @@ case "$group $cmd" in
     ;;
 
   "pr create")
-    [ -n "$head" ] && [ -n "$base" ] || { echo "gh stub: pr create needs --head and --base" >&2; exit 1; }
+    if [ -z "$head" ] || [ -z "$base" ]; then echo "gh stub: pr create needs --head and --base" >&2; exit 1; fi
     og rev-parse -q --verify "refs/heads/$head" >/dev/null || { echo "gh stub: head branch $head is not on the remote" >&2; exit 1; }
     n="$(db -r '.next')"
     save --argjson n "$n" --arg h "$head" --arg b "$base" --arg t "$title" --arg body "$body" \

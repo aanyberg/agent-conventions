@@ -17,6 +17,9 @@ command replaces a prompt like this:
 
 - **Two commands.** `plan` groups the backlog into batches and builds
   nothing. `execute` builds batches and never plans.
+- **The whole backlog is read.** `plan` reads every open item and decides
+  for each whether it can be built here. What it leaves out (already done,
+  blocked outside the repository, not a work item) is listed with the reason.
 - **Named batches.** `plan` groups the open items by theme and by what
   depends on what, into batches A, B, C… The names stay valid between
   sessions.
@@ -84,6 +87,14 @@ Remaining
     029: Show the validated address in the summary
   Batch F "Receipts" (needs E, which is todo)
     031: Email a receipt
+
+Left out of the plan (read 9 open items from BACKLOG.md)
+  Already done
+    008: Send the receipt email
+      Why: Shipped in #41; only the provider's domain check is left.
+  Not a work item
+    030: Checkout epic
+      Why: Tracks 012, 015, 021 and 029.
 ```
 
 ## What it will not do

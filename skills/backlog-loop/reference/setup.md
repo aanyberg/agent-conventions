@@ -46,7 +46,6 @@ Optional. Add a section to the project's `CLAUDE.md` (`.claude/CLAUDE.md` and
 | Key | Default | Meaning |
 |---|---|---|
 | `source` | from the plan | `github` (issues) or `file`. Without it the planner follows the repository's evidence. |
-| `label` | `backlog` | `github`: open issues with this label are the backlog. |
 | `path` | `BACKLOG.md` | `file`: the backlog file. |
 | `base-branch` | repository default | The branch the pull requests target. |
 | `merge-method` | `squash` | `squash`, `merge` or `rebase`. |

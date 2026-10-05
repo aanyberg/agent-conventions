@@ -1,6 +1,6 @@
 ---
 name: ios-simulator-browser
-description: Mirror an iOS Simulator into the Codex in-app browser and render SwiftUI previews from importable Swift packages in that simulator with hot reload. Use when a user wants to watch or interact with an iOS app in the browser, see a SwiftUI preview outside Xcode Canvas, iterate live on a preview, or capture browser-visible simulator proof.
+description: Mirror an iOS Simulator into a browser and render SwiftUI previews from importable Swift packages in that simulator with hot reload. Use when a user wants to watch or interact with an iOS app in the browser, see a SwiftUI preview outside Xcode Canvas, iterate live on a preview, or capture browser-visible simulator proof.
 ---
 
 # iOS Simulator Browser
@@ -20,7 +20,7 @@ description: Mirror an iOS Simulator into the Codex in-app browser and render Sw
    npx --yes serve-sim@latest "$SIM"
    ```
 
-3. Open the exact local preview URL printed by `serve-sim` in the Codex in-app browser.
+3. Open the exact local preview URL printed by `serve-sim` in the assistant's browser tool, or the user's browser when none is available.
 4. Verify that a real frame is rendering before reporting success. A loaded page alone is not proof that the simulator stream is healthy.
 
 - Keep the terminal alive while the browser mirror is in use. When finished, stop the terminal and wait for it to exit so the trap runs.
@@ -40,7 +40,7 @@ node <skill-root>/scripts/swiftui-preview-browser.mjs \
 
 - Watch mode is enabled by default. On a Swift package source edit, the launcher rebuilds a generated dylib and hot-swaps it into the running host without relaunching the app.
 - The generated host shows every preview variant discovered in the selected Swift Package target with in-simulator page controls. To show a subset instead, pass `--preview-filter <regex[, ...]>`; it matches display names and code identifiers such as `StatusRowView_Previews`.
-- Once the launcher prints the selected Simulator UDID, start `serve-sim` for that same UDID and open its printed URL in the in-app browser.
+- Once the launcher prints the selected Simulator UDID, start `serve-sim` for that same UDID and open its printed URL in the browser.
 
 ## Support Boundary
 

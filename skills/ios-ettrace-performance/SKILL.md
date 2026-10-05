@@ -25,7 +25,7 @@ Use a writable run folder for each profiling session:
 
 ```bash
 if [ -z "${RUN_DIR:-}" ]; then
-  RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/codex-ios-ettrace.XXXXXX")"
+  RUN_DIR="$(mktemp -d "${TMPDIR:-/tmp}/ios-ettrace.XXXXXX")"
 fi
 mkdir -p "$RUN_DIR"
 ```
@@ -149,7 +149,7 @@ ettrace --simulator --verbose --dsyms "$DSYMS"
 
 Start from a stable screen, start ETTrace, perform exactly one focused flow, wait until visible work is complete, then stop the runner. For wider attribution, add `--multi-thread`; otherwise start with the main thread.
 
-In Codex, run `ettrace` with a TTY and answer prompts with `write_stdin`. Without a TTY, the runner can exit without a useful trace.
+Run `ettrace` with a TTY and answer its prompts through the terminal's stdin. Without a TTY, the runner can exit without a useful trace.
 
 ## Preserve Outputs
 

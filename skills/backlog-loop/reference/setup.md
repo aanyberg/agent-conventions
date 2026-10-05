@@ -20,14 +20,15 @@ settings.
 
 | Command | Effect |
 |---|---|
-| `/backlog-loop` | Runs every remaining batch, wave by wave. Plans first when there is no plan or nothing is left of it. Continues an unfinished run. |
-| `/backlog-loop D` | Runs batch D only. Several names run several batches, in waves among themselves. |
-| `/backlog-loop plan` | Plans the open items into batches, shows the plan and stops. Use it after the backlog changed, or to queue set-aside items again. |
-| `/backlog-loop status` | Shows the plan and the last report. Changes nothing. |
-| `--no-merge` | With any of the run forms: each batch stops at a green pull request. Merge it, then run `/backlog-loop` again for the batches that need it. |
+| `/backlog-loop plan` | Groups the open items into named batches by theme and dependency, shows the plan and stops. Builds nothing. Use it first, after the backlog changed, and to queue set-aside items again. |
+| `/backlog-loop execute` | Runs every remaining batch of the plan, wave by wave. Continues an unfinished run. |
+| `/backlog-loop execute D` | Runs batch D only. Several names run several batches, in waves among themselves. |
+| `/backlog-loop execute --no-merge` | With or without names: each batch stops at a green pull request. Merge it, then run `execute` again for the batches that need it. |
+| `/backlog-loop status` | Shows the plan and the last report. Changes nothing. `/backlog-loop` alone does the same. |
 
-A batch that needs an unmerged batch cannot be started alone: name both, as
-in `/backlog-loop B D`.
+`execute` never plans: without a plan, or with nothing left of it, it says so
+and stops. A batch that needs an unmerged batch cannot be started alone: name
+both, as in `/backlog-loop execute B D`.
 
 ## Configuration
 
@@ -131,7 +132,7 @@ of set-aside batches stay, with their open pull request.
 
 ## Resume
 
-Run `/backlog-loop` again. It works after a crash, a usage limit, a closed
+Run `/backlog-loop execute` again. It works after a crash, a usage limit, a closed
 terminal or a halt. Batches in progress continue where GitHub says they are:
 an open pull request goes on waiting for CI, a merged one is verified, a
 finished worker's commit is kept, and a lost worker's item is handed out
@@ -141,16 +142,17 @@ again. Merged batches are never redone.
 
 | Symptom | Cause and fix |
 |---|---|
-| `another session (...) is running the loop here` | A run is active, or its session died less than 15 minutes ago. If it is gone, delete `.planning/backlog-loop/lock` and run `/backlog-loop`. |
+| `another session (...) is running the loop here` | A run is active, or its session died less than 15 minutes ago. If it is gone, delete `.planning/backlog-loop/lock` and run `/backlog-loop execute`. |
 | `CI is red on main` | The base branch must be green before the loop adds to it. |
-| `batch D needs B, which is not merged` | Run both: `/backlog-loop B D`. If B was set aside, D waits until B's items are planned again and merged. |
+| `batch D needs B, which is not merged` | Run both: `/backlog-loop execute B D`. If B was set aside, D waits until B's items are planned again and merged. |
 | `halted - no CI checks ran on PR #n` | The pull request triggered no workflow. Add CI for pull requests, or set `ci: optional`. |
-| `halted - URGENT: main is red after PR #n merged` | CI on the base branch failed after the merge. Merge the revert pull request the loop opened, then run `/backlog-loop`. |
-| `halted - stalled` | The agent tried to stop three times without advancing the loop, usually because a command keeps being denied. Read the end of `run.log`, fix the permission rule, run `/backlog-loop`. |
-| The run stopped although work remains | The Stop hook block cap was reached, or the turn ended on an error. Run `/backlog-loop`. |
+| `halted - URGENT: main is red after PR #n merged` | CI on the base branch failed after the merge. Merge the revert pull request the loop opened, then run `/backlog-loop execute`. |
+| `halted - stalled` | The agent tried to stop three times without advancing the loop, usually because a command keeps being denied. Read the end of `run.log`, fix the permission rule, run `/backlog-loop execute`. |
+| The run stopped although work remains | The Stop hook block cap was reached, or the turn ended on an error. Run `/backlog-loop execute`. |
+| `there is no batch left to execute` | Everything planned is merged or set aside. Run `/backlog-loop plan` to pick up new backlog items. |
 | A batch was set aside with its pull request open | CI stayed red after `max-fixes` attempts, or a conflict with the base branch could not be resolved. Fix and merge the pull request yourself, or close it and run `/backlog-loop plan` to queue its items again. |
 | Hooks do nothing | The skill is in neither default location. Set `BACKLOG_LOOP_HOME`. Check with `/hooks`. |
-| State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active. The next run plans again. |
+| State looks wrong | Never edit `state.json`. To start over, delete `.planning/backlog-loop/` while no run is active, then run `/backlog-loop plan`. |
 
 ## Tests
 

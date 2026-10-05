@@ -1,7 +1,7 @@
 ---
 name: backlog-loop
-description: Pick up one, several or all backlog batches and implement them in waves, the items of each batch in parallel with subagents, one CI-gated pull request per batch, until everything is merged or set aside.
-argument-hint: "[BATCH...] [--no-merge] | plan | status"
+description: Plan the backlog into named batches by theme and dependency, then execute one, several or all batches in waves, the items of each batch in parallel with subagents, one CI-gated pull request per batch.
+argument-hint: "plan | execute [BATCH...] [--no-merge] | status"
 disable-model-invocation: true
 disallowed-tools: AskUserQuestion
 allowed-tools: Bash(${CLAUDE_SKILL_DIR}/scripts/*) Bash(git *) Bash(gh *)
@@ -36,16 +36,19 @@ Arguments of this invocation: `$ARGUMENTS`
 
 | Arguments | Meaning |
 |---|---|
-| none | Run every remaining batch, wave by wave. Plan first when there is no plan. |
-| `D`, or `D E` | Run only these batches. |
-| `plan` | Plan (or re-plan) the open items into batches, show the plan, stop. |
-| `status` | Show the plan and the last report. Change nothing. |
-| `--no-merge` | Stop each batch at a green pull request; the user merges. |
+| `plan` | Group the open items into named batches by theme and dependency, show the plan, stop. Nothing is built. |
+| `execute` | Run every remaining batch of the plan, wave by wave. Also continues an unfinished run. |
+| `execute D`, `execute D E` | Run only these batches. |
+| `execute … --no-merge` | Stop each batch at a green pull request; the user merges. |
+| `status`, or nothing | Show the plan and the last report. Change nothing. |
 
 1. Run `L start --session ${CLAUDE_SESSION_ID} $ARGUMENTS`.
-2. If it exits non-zero, show its output unchanged and stop. If the argument
-   was `status`, show its output and stop.
-3. Enter the loop.
+2. If it exits non-zero, show its output unchanged and stop.
+3. If the command was `plan` or `execute`, enter the loop. Otherwise show the
+   output unchanged and stop.
+
+`execute` never plans. Without a plan, or with nothing left of it, `start`
+says so and the user runs `/backlog-loop plan`.
 
 ## The loop
 
@@ -61,7 +64,7 @@ in `.planning/backlog-loop/`, not in this conversation.
 
 | Action | What you do |
 |---|---|
-| `plan` | Read the backlog, split the open items into named batches, write `plan.json`. Read `reference/planning.md` first. |
+| `plan` | Read the backlog, group the open items into named batches by theme and dependency, write `plan.json`. Read `reference/planning.md` first. |
 | `research` | One read-only `Explore` agent per unclear item, in parallel. Write a decision record for each. `reference/workers.md` has the rules and the template. |
 | `implement` | One worker per listed item, all started in one message. Record what each one reports. |
 | `apply` | One worker puts an item that conflicts with its batch onto the batch branch. |
@@ -104,4 +107,5 @@ in `.planning/backlog-loop/`, not in this conversation.
 A Stop hook sends you back to `L next` while the run is unfinished. It lets
 you stop when the run is done or halted, and while background workers are
 running: their completion notification starts your next turn. If a turn ends
-early anyway, nothing is lost: `/backlog-loop` continues from the state.
+early anyway, nothing is lost: `/backlog-loop execute` continues from the
+state.

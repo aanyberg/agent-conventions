@@ -1,7 +1,7 @@
 # Planning batches and waves
 
 The `plan` action asks you to split the open backlog items into named
-batches. The plan is stored with the run's state, so `/backlog-loop D` means
+batches. The plan is stored with the run's state, so `/backlog-loop execute D` means
 the same batch tomorrow as today.
 
 - A **batch** is one pull request. Its items are implemented at the same
@@ -34,13 +34,51 @@ Run `L status` before you plan again. Keep the name and content of a batch
 that has not changed, so that the names the user knows stay valid. Merged
 batches keep their names; a new batch must not reuse one.
 
-## What goes into one batch
+## How to group items
+
+A batch is a group a reviewer would recognise: one theme, one pull request.
+Build the plan in three steps.
+
+**1. Group by theme.** Put items together that belong to the same thing. Use
+the strongest signal the backlog gives, in this order:
+
+- the backlog's own grouping: an epic, a milestone, a section heading, a
+  category or area column, a label such as `area:checkout`;
+- the same feature or user-facing surface (the address form, the receipt
+  email);
+- the same part of the code (one module, one service, one schema);
+- the same kind of work (copy fixes, dependency bumps, test gaps), for items
+  that fit no feature group.
+
+Name the theme in the batch's `theme`, in the words the backlog uses.
+
+**2. Follow the relation chains.** Read each item's "depends on", "blocked
+by" and "after #n" links, and the links in its text. A chain is a set of
+items where one needs another's code.
+
+- Items of one chain belong to the same theme, even when the backlog files
+  them under different categories. Move them together.
+- Items of a batch are built at the same time, so two items of a chain cannot
+  share a batch. Cut the chain into steps: the items that need nothing go into
+  the theme's first batch, the items that need those into its next batch, and
+  so on. Link the steps with `needs`.
+- Give the steps of one theme the same theme text with a step suffix, for
+  example "Address form (1/2)" and "Address form (2/2)".
+
+**3. Check each batch against the limits below**, and split or regroup the
+ones that break them. Split along a sub-theme, not arbitrarily.
+
+A theme with a single item is a batch of one. Do not pad a batch with
+unrelated items to fill it.
+
+## Limits of one batch
 
 1. **Independent items.** They are built at the same time from the same base.
-   None may need another's code.
+   None may need another's code: that is a chain, see step 2.
 2. **Items that do not edit the same lines.** Their commits are combined onto
    one branch. A conflict costs an extra worker, and the item leaves the batch
-   if that fails.
+   if that fails. Items of one theme often touch the same file; when they
+   would edit the same lines, put them in consecutive steps of the theme.
 3. **One kind of risk.** Do not mix a schema migration with copy changes, or a
    dependency upgrade with a feature. If the batch has to be reverted, all of
    it goes.
@@ -55,8 +93,9 @@ Batches of the same wave are built from the same base and merge one after
 another. Each later one is updated from the base branch and tested again
 before it merges.
 
-- Give a batch `needs` when it builds on another batch's code, or when its
-  items say "after #n". Same theme or same area is not a dependency.
+- Give a batch `needs` when it builds on another batch's code: the next step
+  of a relation chain, or items that say "after #n". Same theme alone is not
+  a dependency.
 - Batches without `needs` between them start together, at most
   `parallel-batches` at once (default 3).
 - Keep batches of one wave in different parts of the code. Two batches that
@@ -68,7 +107,8 @@ before it merges.
 
 ## Names
 
-Name batches `A`, `B`, `C`, … in the order they should run. Continue after the
+Name batches `A`, `B`, `C`, … in the order they should run, keeping the
+steps of one theme next to each other. Continue after the
 highest letter already used (`L status` shows it). If the backlog already
 groups items under its own batch names (a "Batch" column, `batch:<name>`
 labels, section headings), use those names instead.
@@ -99,6 +139,9 @@ built; only an item that research cannot settle is set aside.
 
 ## Plan format
 
+Planning builds nothing. The user starts the work with
+`/backlog-loop execute`, for all batches or by name.
+
 Write `.planning/backlog-loop/plan.json`, then run `L plan-apply`. It checks
 the plan and names every problem.
 
@@ -109,7 +152,7 @@ the plan and names every problem.
   "batches": [
     {
       "name": "A",
-      "theme": "Address form validation",
+      "theme": "Address form (1/2): validation",
       "title": "feat(forms): validate address fields",
       "rationale": "Three independent validators for fields of the same form.",
       "tier": "standard",
@@ -121,7 +164,8 @@ the plan and names every problem.
     },
     {
       "name": "B",
-      "theme": "Checkout summary",
+      "theme": "Address form (2/2): checkout summary",
+      "rationale": "Builds on the validators of batch A (029 depends on 012).",
       "needs": ["A"],
       "items": [{"id": "029", "title": "Show the validated address in the summary"}]
     }

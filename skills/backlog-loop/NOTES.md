@@ -11,7 +11,9 @@ Each was confirmed by the owner before the rewrite.
 
 | Decision | Why |
 |---|---|
-| Batches are named and stored with the state. `/backlog-loop D` runs one. | The backlogs in use have no durable batch structure; batch names existed only in chat. |
+| Two commands: `plan` creates the batches and builds nothing; `execute [BATCH...]` builds and never plans. A bare `/backlog-loop` only shows the status. | A clear command structure: the plan can be read before anything runs, and a run never re-plans behind the user's back. |
+| `plan` groups items by theme first, then cuts relation chains into steps linked by `needs`. | A batch should read as one topic to a reviewer; dependent items cannot share a batch because its items are built at the same time. |
+| Batches are named and stored with the state. `/backlog-loop execute D` runs one. | The backlogs in use have no durable batch structure; batch names existed only in chat. |
 | Batches run in waves: every batch whose `needs` are merged starts together. | Sequential batches left workers idle whenever a batch was small. |
 | One script, `loop.sh`, does every mechanical step. The agent gets only `plan`, `research`, `implement`, `apply`, `mark_backlog`, `fix`, `conflict`, `wait`, `done`, `halt`. | Fewer agent-facing actions means fewer places where a prompt can go wrong, and less to re-learn after a compaction. |
 | The script merges; the guard denies every `gh pr merge` from the agent. | A merge then always follows the script's own check that the pull request is green and contains the base branch. |
@@ -23,7 +25,7 @@ Each was confirmed by the owner before the rewrite.
 | No compatibility with the first version's state or configuration keys. | A rewrite; `state.json` carries `version: 3` and older state is refused with a message. |
 
 Not carried over from the first version: `--plan-only` (now `plan`),
-`--resume` (run the command again), `--gitignore`, per-tier project agents,
+`--resume` (run `execute` again), `--gitignore`, per-tier project agents,
 `batch-commits: squashed`, labels on issues, the iteration limit, and
 automatic re-queueing of items into new batches. An item that leaves its
 batch is reported as remaining and is planned again by `/backlog-loop plan`.

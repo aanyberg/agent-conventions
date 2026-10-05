@@ -98,10 +98,18 @@ plan() {
   "$L" plan-apply
 }
 
-# planned <json>: a plan-only run, so that a plan exists before a run starts.
+# planned <json>: what /backlog-loop plan does.
 planned() {
   "$L" start --session s1 plan >/dev/null
   plan "$1" >/dev/null
+}
+
+# execute <plan json> [start arguments]: plan, then start executing.
+execute() {
+  local p="$1"
+  shift
+  planned "$p"
+  "$L" start --session s1 "$@" execute >/dev/null
 }
 
 # next: ask for the next action. Sets ACTION (JSON) and ACT (its name).

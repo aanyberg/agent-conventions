@@ -11,11 +11,15 @@ command replaces a prompt like this:
 > implemented and then list the remaining items/batches.
 
 ```text
-/backlog-loop D
+/backlog-loop plan
+/backlog-loop execute D
 ```
 
-- **Named batches.** The backlog is split into batches A, B, C… once, and the
-  names stay valid between sessions.
+- **Two commands.** `plan` groups the backlog into batches and builds
+  nothing. `execute` builds batches and never plans.
+- **Named batches.** `plan` groups the open items by theme and by what
+  depends on what, into batches A, B, C… The names stay valid between
+  sessions.
 - **Waves.** Batches that do not depend on each other start together. Each
   batch gets one worker per item and lands as one pull request.
 - **CI is the only judge.** Nothing is tested locally. A pull request merges
@@ -23,8 +27,8 @@ command replaces a prompt like this:
 - **No questions.** An unclear item is researched and decided, with a
   decision record. If research does not settle it, the item is set aside and
   the run goes on.
-- **Safe to interrupt.** The run lives on disk. Run the command again after a
-  crash, a usage limit or a closed terminal and it continues.
+- **Safe to interrupt.** The run lives on disk. Run `/backlog-loop execute`
+  again after a crash, a usage limit or a closed terminal and it continues.
 
 ## Quick start
 
@@ -34,25 +38,23 @@ command replaces a prompt like this:
 3. Run it:
 
 ```text
-/backlog-loop plan      # split the backlog into batches and look at them
-/backlog-loop D         # run one batch
-/backlog-loop           # or run everything that remains, wave by wave
+/backlog-loop plan           # group the backlog into batches and look at them
+/backlog-loop execute D      # run one batch
+/backlog-loop execute        # or run everything that remains, wave by wave
 ```
-
-Without a plan, `/backlog-loop` plans first and then runs.
 
 ## Examples
 
 Run two batches. They share a wave unless one needs the other:
 
 ```text
-/backlog-loop B D
+/backlog-loop execute B D
 ```
 
 Keep the merge button for yourself. Each batch stops at a green pull request:
 
 ```text
-/backlog-loop --no-merge
+/backlog-loop execute --no-merge
 ```
 
 See where things stand without changing anything:
@@ -67,7 +69,7 @@ What you get at the end:
 Backlog loop: done
 
 Implemented in this run
-  Batch D "Address form validation": PR #214, merged
+  Batch D "Address form (1/2): validation": PR #214, merged
     012: Validate the postal code
     015: Fix the street label typo
     021: Validate the country  [decided by research, medium confidence: decisions/021.md]
@@ -78,7 +80,7 @@ Set aside
     Needs: the owner's choice between the two mockups
 
 Remaining
-  Batch E "Checkout summary"
+  Batch E "Address form (2/2): checkout summary"
     029: Show the validated address in the summary
   Batch F "Receipts" (needs E, which is todo)
     031: Email a receipt
@@ -100,7 +102,7 @@ troubleshooting are in [`reference/setup.md`](reference/setup.md).
 
 ```mermaid
 flowchart TD
-    You(["/backlog-loop D"]) --> Skill["SKILL.md<br/>orchestrator (Claude)"]
+    You(["/backlog-loop execute D"]) --> Skill["SKILL.md<br/>orchestrator (Claude)"]
     Skill -->|"next"| Loop["loop.sh<br/>owns the state, does every mechanical step"]
     Loop -->|"one action that needs judgement"| Skill
     Skill -->|"plan"| Plan["named batches<br/>plan.json"]

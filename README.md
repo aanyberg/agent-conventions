@@ -31,7 +31,6 @@ already established or explicitly requested.
 | `test-driven-development` | Workflow | Implements approved scenarios with a failing test first. | New features and behaviour changes |
 | `task-workflow` | Workflow | Manages task records, merge readiness, and autonomous implementation of an item. | Task execution |
 | `backlog-management` | Workflow | Lists, creates, claims, links, and updates work items in the repository's tracker. | Backlog |
-| `backlog-loop` | Workflow | Plans the backlog into named batches and executes them in waves, one pull request per batch. | Backlog |
 | `git-conventions` | Workflow | Follows repository-native commit, branch, pull request, and worktree conventions. | Git |
 | `architecture-planning` | Design | Guides architectural decisions, boundaries, technology choices, and decision records. | Architecture |
 | `testing-strategy` | Design | Designs test strategies and test plans. | Testing |
@@ -55,15 +54,6 @@ already established or explicitly requested.
 | `swiftui-performance-audit` | SwiftUI | Audits runtime performance from code first. | SwiftUI performance |
 | `swiftui-ui-patterns` | SwiftUI | Builds and refactors UI with component patterns and examples. | SwiftUI UI |
 | `swiftui-view-refactor` | SwiftUI | Refactors view files into stable, testable structure. | SwiftUI structure |
-
-## Skills with their own documentation
-
-Most skills are a single `SKILL.md`. The larger ones ship a README that
-explains what they do, how to use them, and how they work inside:
-
-| Skill | What it does |
-|---|---|
-| [`backlog-loop`](skills/backlog-loop/README.md) | Works through a backlog unattended: named batches run in waves, one worker per item, one CI-gated pull request per batch, with set-aside and remaining items reported. |
 
 ## Installation
 

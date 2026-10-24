@@ -37,6 +37,7 @@ Choose a track based on your goal:
 - Follow the project's formatter and style guide.
 - **Sheets**: Prefer `.sheet(item:)` over `.sheet(isPresented:)` when state represents a selected model. Avoid `if let` inside a sheet body. Sheets should own their actions and call `dismiss()` internally instead of forwarding `onCancel`/`onConfirm` closures.
 - **Scroll-driven reveals**: Prefer deriving a normalized progress value from scroll offset and driving the visual state from that single source of truth. Avoid parallel gesture state machines unless scroll alone cannot express the interaction.
+- **Motion and gestures**: For anything a finger can drag, flick, or dismiss, follow `apple-design` (springs, interruptibility, velocity handoff, reduced motion). Its `references/swiftui.md` maps each rule to SwiftUI APIs.
 
 ## State ownership summary
 

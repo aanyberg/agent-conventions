@@ -47,6 +47,10 @@ node <skill-root>/scripts/swiftui-preview-browser.mjs \
 - Support Swift Package-backed `PreviewProvider` and `#Preview` declarations through the generated host.
 - Do not edit the user's `.xcodeproj`, `.xcworkspace`, `Package.swift`, schemes, or build settings to force preview support.
 
+## Motion review
+
+To review animation frame by frame, enable Simulator's Debug > Slow Animations (⌘T) before capturing. Use the `apple-design` skill for what to look for: a jump on interrupt, a seam between drag and animation, or overshoot on a non-momentum transition.
+
 ## Proof
 
 For browser or preview QA, capture a browser screenshot showing the simulator frame. For hot reload QA, also report the launcher's `hot reloaded package preview ... in pid ...` output and show the changed frame after editing.

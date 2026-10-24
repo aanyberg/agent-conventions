@@ -36,6 +36,7 @@ Use this file to find component and cross-cutting guidance. Each entry lists whe
 - Async state and task lifecycle: `references/async-state.md` — Use when a view loads data, reacts to changing input, or needs cancellation/debouncing guidance.
 - Previews: `references/previews.md` — Use when adding `#Preview`, fixtures, mock environments, or isolated preview setup.
 - Performance guardrails: `references/performance.md` — Use when a screen is large, scroll-heavy, frequently updated, or showing signs of avoidable re-renders.
+- Motion, materials, and design foundations: the `apple-design` skill — Use for springs, gesture handoff, interruptibility, material hierarchy, typography, reduced motion, and feedback rules.
 
 ## Planned components (create files as needed)
 

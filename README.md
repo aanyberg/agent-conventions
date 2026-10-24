@@ -45,6 +45,7 @@ already established or explicitly requested.
 | `rust-coding-guidelines` | Language | Applies Rust idioms, type system usage, error handling, and naming. | Rust |
 | `rust-design-patterns` | Language | Applies design patterns when structuring or refactoring components. | Rust |
 | `typescript-coding-guidelines` | Language | Applies idioms, type system usage, error handling, and naming. | TypeScript and JavaScript |
+| `apple-design` | Design | Applies Apple's fluid-motion, material, typography, and design-foundation principles, with SwiftUI and web mappings. | Interaction design |
 | `ios-app-intents` | iOS | Designs App Intents, app entities, and App Shortcuts. | iOS system surfaces |
 | `ios-debugger-agent` | iOS | Builds, runs, and debugs apps on Simulator with XcodeBuildMCP. | iOS debugging |
 | `ios-ettrace-performance` | iOS | Captures and interprets Simulator ETTrace profiles. | iOS performance |

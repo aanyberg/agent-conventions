@@ -120,6 +120,10 @@ This keeps the motion coherent and avoids duplicate-hit-target bugs.
 - Disable hit testing on overlays that should disappear once the secondary content is revealed.
 - Avoid same-axis nested scroll views unless the inner view is effectively static or disabled during the reveal.
 
+## Motion rules
+
+This pattern follows `apple-design` §3 to §8: one live progress value, interruptible at any point, intermediate frames pointing at the outcome. When snapping programmatically use a critically damped spring (`.smooth` or `.spring(duration: 0.3, bounce: 0)`); add bounce only when the user flicked. Honour `accessibilityReduceMotion` by cross-fading instead of translating the secondary content.
+
 ## Pitfalls
 
 - Do not hard-code the progress divisor. Measure the secondary section height or another real reveal distance.

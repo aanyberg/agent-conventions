@@ -22,10 +22,9 @@ struct AppRootView: View {
         if let toast {
           ToastView(toast: toast)
             .transition(.move(edge: .top).combined(with: .opacity))
-            .onAppear {
-              DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                withAnimation { self.toast = nil }
-              }
+            .task {
+              try? await Task.sleep(for: .seconds(2))
+              withAnimation { self.toast = nil }
             }
         }
       }
@@ -36,7 +35,7 @@ struct AppRootView: View {
 ## Design choices to keep
 
 - Prefer overlays for transient UI rather than embedding in layout stacks.
-- Use transitions and short auto-dismiss timers.
+- Use transitions and short auto-dismiss timers. Run the timer in `.task` so it cancels when the toast is replaced or swiped away, and let a drag dismiss it early (`apple-design` §3).
 - Keep the overlay aligned to a clear edge (`.top` or `.bottom`).
 
 ## Pitfalls

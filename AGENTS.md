@@ -13,6 +13,12 @@
 | Writing/reviewing code, linting | `code-standards` + the language guideline skill |
 | Writing/updating docs, READMEs, changelogs, role/layer docs | `docs-standards` |
 | Auditing code health, prioritising refactors | `tech-debt` |
+| Gesture-driven UI, springs, transitions, materials, typography, reduced motion, or judging whether a control earns its place | `apple-design`, plus the platform skill below |
+| Building or refactoring SwiftUI screens, navigation, state, or components | `swiftui-ui-patterns`, `swiftui-view-refactor` |
+| Adopting or reviewing iOS 26 Liquid Glass | `swiftui-liquid-glass` |
+| Slow rendering, janky scrolling, or profiling SwiftUI | `swiftui-performance-audit`, `ios-ettrace-performance`, `ios-memgraph-leaks` |
+| Building, running, inspecting, or previewing an iOS app on Simulator | `ios-debugger-agent`, `ios-simulator-browser` |
+| App Intents, app entities, App Shortcuts | `ios-app-intents` |
 
 ## Quick Reference
 

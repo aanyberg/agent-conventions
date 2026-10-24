@@ -10,7 +10,8 @@ Provide a clean, scalable theming approach that keeps view code semantic and con
 - Inject theme at the app root and read it via `@Environment(Theme.self)` in views.
 - Prefer semantic colors (`primaryBackground`, `secondaryBackground`, `label`, `tint`) instead of raw colors.
 - Keep user-facing theme controls in a dedicated settings screen.
-- Apply Dynamic Type scaling through custom fonts or `.font(.scaled...)`.
+- Apply Dynamic Type scaling through custom fonts or `.font(.scaled...)`, and scale spacing with `@ScaledMetric` so layout grows with the text.
+- Prefer system text styles over fixed sizes; they carry size-specific tracking and optical sizing. For tracking, leading, and weight-based hierarchy rules read `apple-design` §15.
 
 ## Example: Theme object
 

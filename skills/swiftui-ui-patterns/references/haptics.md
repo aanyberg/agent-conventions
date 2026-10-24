@@ -4,8 +4,22 @@
 
 Use haptics sparingly to reinforce user actions (tab selection, refresh, success/error) and respect user preferences.
 
+## Three rules
+
+From `apple-design` §13:
+
+1. **Causality.** Fire on the causal event (the toggle flipping, the item snapping home), and match the haptic's character to the action's physicality.
+2. **Harmony.** The visual change, the haptic, and any sound land on the same frame. On iOS 17+, `.sensoryFeedback(_:trigger:)` attached to the causal state does this by construction.
+3. **Utility.** Reserve haptics for meaningful moments: success, error, commit, snap. Over-feedback trains users to ignore all of it.
+
+```swift
+Toggle("Mentions", isOn: $mentionsEnabled)
+  .sensoryFeedback(.selection, trigger: mentionsEnabled)
+```
+
 ## Core patterns
 
+- Prefer `.sensoryFeedback` on iOS 17+; use the manager below for custom intensity or earlier targets.
 - Centralize haptic triggers in a `HapticManager` or similar utility.
 - Gate haptics behind user preferences and hardware support.
 - Use distinct types for different UX moments (selection vs. notification vs. refresh).

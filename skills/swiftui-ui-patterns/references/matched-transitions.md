@@ -51,7 +51,8 @@ struct ToggleBadge: View {
 
 - Prefer `matchedTransitionSource` for cross-screen transitions.
 - Keep source and destination sizes reasonable to avoid jarring scale changes.
-- Use `withAnimation` for state-driven transitions.
+- Use `withAnimation` for state-driven transitions. Default to `.spring(duration: 0.4, bounce: 0)`; reserve bounce for gestures that carried momentum (`apple-design` §4).
+- Enter and exit along the same path; the destination grows from its source and returns to it (`apple-design` §7).
 
 ## Pitfalls
 

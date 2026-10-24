@@ -27,6 +27,7 @@ Choose the path that matches the request:
 - Add morphing transitions only when the view hierarchy changes with animation.
 
 ## Core Guidelines
+- This skill owns the API. For when glass is appropriate, how material weight encodes hierarchy, scrim versus no scrim, vibrancy, and reduced-transparency fallbacks, read `apple-design` (SKILL.md §12 and §14, `references/swiftui.md`).
 - Prefer native Liquid Glass APIs over custom blurs.
 - Use `GlassEffectContainer` when multiple glass elements coexist.
 - Apply `.glassEffect(...)` after layout and visual modifiers.
@@ -41,6 +42,8 @@ Choose the path that matches the request:
 - **Interactivity**: `interactive()` only where user interaction exists.
 - **Transitions**: `glassEffectID` used with `@Namespace` for morphing.
 - **Consistency**: Shapes, tinting, and spacing align across the feature.
+- **Hierarchy**: No glass stacked directly on another material; heavier surfaces for structure, lighter for interactive chips.
+- **Accessibility**: Reduced transparency and increased contrast still read; custom blurs have a solid fallback.
 
 ## Implementation Checklist
 - Define target elements and desired glass prominence.
